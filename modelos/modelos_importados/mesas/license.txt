@@ -1,0 +1,11 @@
+Model Information:
+* title:	Mesas
+* source:	https://sketchfab.com/3d-models/mesas-0a8e6b2533b74d4c95d505aa0c04f273
+* author:	Elbolillo (https://sketchfab.com/Elbolilloduro)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Mesas" (https://sketchfab.com/3d-models/mesas-0a8e6b2533b74d4c95d505aa0c04f273) by Elbolillo (https://sketchfab.com/Elbolilloduro) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
