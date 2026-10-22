@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="luchaLibreCompuG/luchaLibreCompuG.vcxproj" Id="b0f88be9-6a78-491a-8fd6-ede3d94e89d4" />
+</Solution>
