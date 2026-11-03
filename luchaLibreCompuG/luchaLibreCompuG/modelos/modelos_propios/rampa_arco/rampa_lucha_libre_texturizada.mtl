@@ -1,0 +1,94 @@
+# Blender 5.2.2 LTS MTL File: 'rampa_lucha_libre_texturizada.blend'
+# www.blender.org
+
+newmtl MAT_Carcasa_Foco
+Ns 360.000000
+Ka 0.600000 0.600000 0.600000
+Kd 0.015000 0.015000 0.017000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+
+newmtl MAT_LED_Calido
+Ns 0.000000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 0.550000 0.080000
+Ks 0.500000 0.500000 0.500000
+Ke 5.000000 2.750000 0.400000
+Ni 1.500000
+d 1.000000
+illum 2
+
+newmtl MAT_Lente_Foco
+Ns 490.000000
+Ka 1.000000 1.000000 1.000000
+Kd 1.000000 0.950000 0.850000
+Ks 0.500000 0.500000 0.500000
+Ke 2.000000 1.900000 1.700000
+Ni 1.500000
+d 1.000000
+illum 2
+
+newmtl MAT_Letrero_Grafico
+Ns 302.500000
+Ka 0.050000 0.050000 0.050000
+Ks 0.500000 0.500000 0.500000
+Ni 1.500000
+d 1.000000
+illum 3
+map_Kd textures/letrero_lucha_libre.png
+map_Ke textures/letrero_lucha_libre.png
+
+newmtl MAT_Metal_Negro
+Ka 0.650000 0.650000 0.650000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+map_Kd textures/metal_negro_basecolor.png
+map_Ns textures/metal_negro_roughness.png
+map_Bump -bm 0.250000 textures/metal_negro_normal.png
+
+newmtl MAT_Rampa_Antiderrapante
+Ka 0.150000 0.150000 0.150000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+map_Kd textures/rampa_basecolor.png
+map_Ns textures/rampa_roughness.png
+map_Bump -bm 0.350000 textures/rampa_normal.png
+
+newmtl Material_Letrero
+Ns 250.000000
+Ka 0.200000 0.200000 0.200000
+Kd 0.150000 0.015000 0.020000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+
+newmtl Material_Suelo
+Ns 10.000005
+Ka 1.000000 1.000000 1.000000
+Kd 0.040000 0.040000 0.045000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+
+newmtl Material_Texto
+Ns 360.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.950000 0.900000 0.750000
+Ks 0.500000 0.500000 0.500000
+Ke 1.140000 1.080000 0.840000
+Ni 1.500000
+d 1.000000
+illum 2
