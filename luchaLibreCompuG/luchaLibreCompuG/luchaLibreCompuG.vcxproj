@@ -23,8 +23,8 @@
     <None Include="Shaders\lamp.vs" />
     <None Include="Shaders\lighting.frag" />
     <None Include="Shaders\lighting.vs" />
-    <None Include="Shaders\modelLoading.frag" />
-    <None Include="Shaders\modelLoading.vs" />
+    <None Include="skybox.frag" />
+    <None Include="skybox.vs" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Camera.h" />

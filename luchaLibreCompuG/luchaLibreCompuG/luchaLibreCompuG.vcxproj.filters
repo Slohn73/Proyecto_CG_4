@@ -30,10 +30,10 @@
     <None Include="Shaders\lamp.vs">
       <Filter>Source Files\Shaders</Filter>
     </None>
-    <None Include="Shaders\modelLoading.frag">
+    <None Include="skybox.vs">
       <Filter>Source Files\Shaders</Filter>
     </None>
-    <None Include="Shaders\modelLoading.vs">
+    <None Include="skybox.frag">
       <Filter>Source Files\Shaders</Filter>
     </None>
   </ItemGroup>
