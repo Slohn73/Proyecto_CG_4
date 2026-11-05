@@ -1,0 +1,48 @@
+# Blender 5.2.2 LTS MTL File: 'cinturon_lucha_libre.blend'
+# www.blender.org
+
+newmtl MAT_Cuero
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd textures/cuero_basecolor.png
+map_Ns textures/cuero_roughness.png
+map_Bump -bm 0.800000 textures/cuero_normal.png
+
+newmtl MAT_Detalle_Metal
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+map_Kd textures/metal_basecolor.png
+map_Ns textures/metal_roughness.png
+map_refl textures/metal_metallic.png
+map_Bump -bm 0.400000 textures/metal_normal.png
+
+newmtl MAT_Gema
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd textures/gema_basecolor.png
+map_Ns textures/gema_roughness.png
+map_Bump -bm 0.500000 textures/gema_normal.png
+
+newmtl MAT_Oro
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.500000
+d 1.000000
+illum 3
+map_Kd textures/oro_basecolor.png
+map_Ns textures/oro_roughness.png
+map_refl textures/oro_metallic.png
+map_Bump -bm 0.600000 textures/oro_normal.png

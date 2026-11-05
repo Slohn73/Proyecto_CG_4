@@ -1,21 +1,18 @@
 #pragma once
 
 #include <string>
-#include <fstream>
-#include <sstream>
 #include <iostream>
 #include <vector>
+#include <map>
+#include <cfloat>
 
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <assimp/Importer.hpp>
-#include <assimp/scene.h>
-#include <assimp/postprocess.h>
-
-
+#include <glm/gtc/type_ptr.hpp>
 
 #include "Shader.h"
+#include "Texture.h"
 
 using namespace std;
 
@@ -27,90 +24,131 @@ struct Vertex
 	glm::vec3 Normal;
 	// TexCoords
 	glm::vec2 TexCoords;
+	// Color por vértice: multiplica al color base (lo usan las mallas unidas de varios materiales)
+	glm::vec3 Color = glm::vec3(1.0f);
 };
 
-struct Texture
+// Propiedades del material que usa Shaders/lighting.frag (struct Material).
+// Si un mapa no existe su id es 0 y el shader usa el color correspondiente.
+struct Material
 {
-	GLuint id;
-	string type;
-	aiString path;
+	string name;
+	glm::vec3 diffuseColor = glm::vec3(0.8f);
+	glm::vec3 specularColor = glm::vec3(0.5f);
+	glm::vec3 emissiveColor = glm::vec3(0.0f);
+	float shininess = 32.0f;
+	float opacity = 1.0f;
+	GLuint diffuseMap = 0;
+	GLuint specularMap = 0;
+	bool alphaTest = false;   // Descarta fragmentos con alfa < 0.1 (recortes como hojas o rejillas)
+
+	bool IsTransparent() const { return opacity < 0.999f; }
+};
+
+// Ubicaciones de los uniforms del material, consultadas una sola vez por programa
+// (evita cientos de glGetUniformLocation por cuadro cuando hay muchas instancias).
+struct MaterialUniforms
+{
+	GLint diffuseMap, specularMap, hasDiffuseMap, hasSpecularMap;
+	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest;
+
+	static const MaterialUniforms& For(GLuint program)
+	{
+		static map<GLuint, MaterialUniforms> cache;
+		auto it = cache.find(program);
+		if (it != cache.end())
+			return it->second;
+
+		MaterialUniforms u;
+		u.diffuseMap = glGetUniformLocation(program, "material.diffuse");
+		u.specularMap = glGetUniformLocation(program, "material.specular");
+		u.hasDiffuseMap = glGetUniformLocation(program, "material.hasDiffuseMap");
+		u.hasSpecularMap = glGetUniformLocation(program, "material.hasSpecularMap");
+		u.diffuseColor = glGetUniformLocation(program, "material.diffuseColor");
+		u.specularColor = glGetUniformLocation(program, "material.specularColor");
+		u.emissiveColor = glGetUniformLocation(program, "material.emissive");
+		u.shininess = glGetUniformLocation(program, "material.shininess");
+		u.opacity = glGetUniformLocation(program, "material.opacity");
+		u.alphaTest = glGetUniformLocation(program, "material.alphaTest");
+		return cache[program] = u;
+	}
 };
 
 class Mesh
 {
 public:
 	/*  Mesh Data  */
-	vector<Vertex> vertices;
-	vector<GLuint> indices;
-	vector<Texture> textures;
+	string name;             // Nombre del nodo de Assimp al que pertenece (útil para depurar y ocultar partes)
+	Material material;
+	glm::vec3 boundsMin;     // Caja envolvente en el espacio del modelo (ya con las transformaciones de nodos)
+	glm::vec3 boundsMax;
+	GLsizei indexCount = 0;
 
 	/*  Functions  */
 	// Constructor
-	Mesh(vector<Vertex> vertices, vector<GLuint> indices, vector<Texture> textures)
+	Mesh(const string& name, const vector<Vertex>& vertices, const vector<GLuint>& indices, const Material& material)
+		: name(name), material(material)
 	{
-		this->vertices = vertices;
-		this->indices = indices;
-		this->textures = textures;
+		this->boundsMin = glm::vec3(FLT_MAX);
+		this->boundsMax = glm::vec3(-FLT_MAX);
+		for (const Vertex& v : vertices)
+		{
+			this->boundsMin = glm::min(this->boundsMin, v.Position);
+			this->boundsMax = glm::max(this->boundsMax, v.Position);
+		}
+		this->indexCount = static_cast<GLsizei>(indices.size());
 
 		// Now that we have all the required data, set the vertex buffers and its attribute pointers.
-		this->setupMesh();
+		// Los datos quedan en la GPU; no se conserva copia en CPU.
+		this->setupMesh(vertices, indices);
 	}
 
 	// Render the mesh
-	void Draw(Shader shader)
+	void Draw(Shader& shader) const
 	{
-		// Bind appropriate textures
-		GLuint diffuseNr = 1;
-		GLuint specularNr = 1;
+		this->Draw(MaterialUniforms::For(shader.Program));
+	}
 
-		for (GLuint i = 0; i < this->textures.size(); i++)
-		{
-			glActiveTexture(GL_TEXTURE0 + i); // Active proper texture unit before binding
-											  // Retrieve texture number (the N in diffuse_textureN)
-			stringstream ss;
-			string number;
-			string name = this->textures[i].type;
+	void Draw(const MaterialUniforms& u) const
+	{
+		const Material& m = this->material;
 
-			if (name == "texture_diffuse")
-			{
-				ss << diffuseNr++; // Transfer GLuint to stream
-			}
-			else if (name == "texture_specular")
-			{
-				ss << specularNr++; // Transfer GLuint to stream
-			}
+		// Unidad 0: difusa, unidad 1: especular. Si no hay mapa se enlaza una textura blanca.
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, m.diffuseMap ? m.diffuseMap : TextureLoader::White());
+		glUniform1i(u.diffuseMap, 0);
+		glUniform1i(u.hasDiffuseMap, m.diffuseMap != 0);
 
-			number = ss.str();
-			// Now set the sampler to the correct texture unit
-			glUniform1i(glGetUniformLocation(shader.Program, (name + number).c_str()), i);
-			// And finally bind the texture
-			glBindTexture(GL_TEXTURE_2D, this->textures[i].id);
-		}
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, m.specularMap ? m.specularMap : TextureLoader::White());
+		glUniform1i(u.specularMap, 1);
+		glUniform1i(u.hasSpecularMap, m.specularMap != 0);
 
-		// Also set each mesh's shininess property to a default value (if you want you could extend this to another mesh property and possibly change this value)
-		glUniform1f(glGetUniformLocation(shader.Program, "material.shininess"), 16.0f);
+		glUniform3fv(u.diffuseColor, 1, glm::value_ptr(m.diffuseColor));
+		glUniform3fv(u.specularColor, 1, glm::value_ptr(m.specularColor));
+		glUniform3fv(u.emissiveColor, 1, glm::value_ptr(m.emissiveColor));
+		glUniform1f(u.shininess, m.shininess);
+		glUniform1f(u.opacity, m.opacity);
+		glUniform1i(u.alphaTest, m.alphaTest);
 
 		// Draw mesh
 		glBindVertexArray(this->VAO);
-		glDrawElements(GL_TRIANGLES, this->indices.size(), GL_UNSIGNED_INT, 0);
+		glDrawElements(GL_TRIANGLES, this->indexCount, GL_UNSIGNED_INT, 0);
 		glBindVertexArray(0);
-
-		// Always good practice to set everything back to defaults once configured.
-		for (GLuint i = 0; i < this->textures.size(); i++)
-		{
-			glActiveTexture(GL_TEXTURE0 + i);
-			glBindTexture(GL_TEXTURE_2D, 0);
-		}
+		glActiveTexture(GL_TEXTURE0);
 	}
 
 private:
 	/*  Render data  */
-	GLuint VAO, VBO, EBO;
+	GLuint VAO = 0, VBO = 0, EBO = 0;
 
 	/*  Functions    */
 	// Initializes all the buffer objects/arrays
-	void setupMesh()
+	void setupMesh(const vector<Vertex>& vertices, const vector<GLuint>& indices)
 	{
+		if (vertices.empty() || indices.empty())
+			return;
+
 		// Create buffers/arrays
 		glGenVertexArrays(1, &this->VAO);
 		glGenBuffers(1, &this->VBO);
@@ -122,10 +160,10 @@ private:
 		// A great thing about structs is that their memory layout is sequential for all its items.
 		// The effect is that we can simply pass a pointer to the struct and it translates perfectly to a glm::vec3/2 array which
 		// again translates to 3/2 floats which translates to a byte array.
-		glBufferData(GL_ARRAY_BUFFER, this->vertices.size() * sizeof(Vertex), &this->vertices[0], GL_STATIC_DRAW);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, this->EBO);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, this->indices.size() * sizeof(GLuint), &this->indices[0], GL_STATIC_DRAW);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), &indices[0], GL_STATIC_DRAW);
 
 		// Set the vertex attribute pointers
 		// Vertex Positions
@@ -137,6 +175,9 @@ private:
 		// Vertex Texture Coords
 		glEnableVertexAttribArray(2);
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)offsetof(Vertex, TexCoords));
+		// Vertex Colors
+		glEnableVertexAttribArray(3);
+		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)offsetof(Vertex, Color));
 
 		glBindVertexArray(0);
 	}

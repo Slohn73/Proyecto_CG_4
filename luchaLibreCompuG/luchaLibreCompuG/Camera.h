@@ -4,7 +4,7 @@
 #include <vector>
 
 // GL Includes
-#define GLEW_STATIC
+// (GLEW se enlaza como DLL con glew32.lib, por eso no se define GLEW_STATIC)
 #include <GL/glew.h>
 
 #include <glm/glm.hpp>
@@ -16,7 +16,9 @@ enum Camera_Movement
 	FORWARD,
 	BACKWARD,
 	LEFT,
-	RIGHT
+	RIGHT,
+	UP,
+	DOWN
 };
 
 // Default camera values
@@ -57,9 +59,10 @@ public:
 	}
 
 	// Processes input received from any keyboard-like input system. Accepts input parameter in the form of camera defined ENUM (to abstract it from windowing systems)
-	void ProcessKeyboard(Camera_Movement direction, GLfloat deltaTime)
+	// speedFactor permite un modo rápido (Shift) sin cambiar la velocidad base
+	void ProcessKeyboard(Camera_Movement direction, GLfloat deltaTime, GLfloat speedFactor = 1.0f)
 	{
-		GLfloat velocity = this->movementSpeed * deltaTime;
+		GLfloat velocity = this->movementSpeed * speedFactor * deltaTime;
 
 		if (direction == FORWARD)
 		{
@@ -79,6 +82,17 @@ public:
 		if (direction == RIGHT)
 		{
 			this->position += this->right * velocity;
+		}
+
+		// Subir y bajar siempre en el eje vertical del mundo
+		if (direction == UP)
+		{
+			this->position += this->worldUp * velocity;
+		}
+
+		if (direction == DOWN)
+		{
+			this->position -= this->worldUp * velocity;
 		}
 	}
 
@@ -112,7 +126,44 @@ public:
 	// Processes input received from a mouse scroll-wheel event. Only requires input on the vertical wheel-axis
 	void ProcessMouseScroll(GLfloat yOffset)
 	{
+		// Zoom: campo de visión vertical entre 15 y 75 grados
+		this->zoom -= yOffset * 2.0f;
+		if (this->zoom < 15.0f) this->zoom = 15.0f;
+		if (this->zoom > 75.0f) this->zoom = 75.0f;
+	}
 
+	// Coloca la cámara en una posición y orientación concretas (vistas predefinidas)
+	void SetPose(glm::vec3 position, GLfloat yaw, GLfloat pitch, GLfloat zoom = ZOOM)
+	{
+		this->position = position;
+		this->yaw = yaw;
+		this->pitch = pitch;
+		this->zoom = zoom;
+		this->updateCameraVectors();
+	}
+
+	// Orienta la cámara hacia un punto del mundo
+	void LookAt(glm::vec3 target)
+	{
+		glm::vec3 dir = glm::normalize(target - this->position);
+		this->pitch = glm::degrees(asin(glm::clamp(dir.y, -1.0f, 1.0f)));
+		this->yaw = glm::degrees(atan2(dir.z, dir.x));
+		this->updateCameraVectors();
+	}
+
+	void SetMovementSpeed(GLfloat speed)
+	{
+		this->movementSpeed = speed;
+	}
+
+	GLfloat GetYaw()
+	{
+		return this->yaw;
+	}
+
+	GLfloat GetPitch()
+	{
+		return this->pitch;
 	}
 
 	GLfloat GetZoom()

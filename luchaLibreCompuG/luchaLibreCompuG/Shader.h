@@ -29,6 +29,10 @@ public:
 			// Open files
 			vShaderFile.open(vertexPath);
 			fShaderFile.open(fragmentPath);
+			if (!vShaderFile.is_open())
+				std::cout << "ERROR::SHADER::FILE_NOT_FOUND: " << vertexPath << std::endl;
+			if (!fShaderFile.is_open())
+				std::cout << "ERROR::SHADER::FILE_NOT_FOUND: " << fragmentPath << std::endl;
 			std::stringstream vShaderStream, fShaderStream;
 			// Read file's buffer contents into streams
 			vShaderStream << vShaderFile.rdbuf();
@@ -59,7 +63,7 @@ public:
 		if (!success)
 		{
 			glGetShaderInfoLog(vertex, 512, NULL, infoLog);
-			std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED\n" << infoLog << std::endl;
+			std::cout << "ERROR::SHADER::VERTEX::COMPILATION_FAILED (" << vertexPath << ")\n" << infoLog << std::endl;
 		}
 		// Fragment Shader
 		fragment = glCreateShader(GL_FRAGMENT_SHADER);
@@ -70,7 +74,7 @@ public:
 		if (!success)
 		{
 			glGetShaderInfoLog(fragment, 512, NULL, infoLog);
-			std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED\n" << infoLog << std::endl;
+			std::cout << "ERROR::SHADER::FRAGMENT::COMPILATION_FAILED (" << fragmentPath << ")\n" << infoLog << std::endl;
 		}
 		// Shader Program
 		this->Program = glCreateProgram();

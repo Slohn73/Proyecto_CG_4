@@ -9,7 +9,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Metal_Gris.jpg
+map_Kd Textura_Gradas/Textura_Metal_Gris.jpg
 
 newmtl Textura_Piso_Grada
 Ns 250.000000
@@ -19,4 +19,4 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Piso_Gradas.jpg
+map_Kd Textura_Gradas/Textura_Piso_Gradas.png

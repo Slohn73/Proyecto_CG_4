@@ -1,0 +1,32 @@
+# Blender 5.2.2 LTS MTL File: 'None'
+# www.blender.org
+
+newmtl color-palette
+Ns 62.500000
+Ka 1.000000 1.000000 1.000000
+Ks 0.168182 0.168182 0.168182
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 2
+map_Kd ../textures/color-palette_0.png
+
+newmtl color-palette.emission
+Ns 250.000000
+Ka 1.000000 1.000000 1.000000
+Ks 0.500000 0.500000 0.500000
+Ni 1.500000
+d 1.000000
+illum 2
+map_Kd ../textures/color-palette_0.png
+map_Ke ../textures/color-palette_0.png
+
+newmtl color-palette.metallic
+Ns 810.000000
+Ka 0.684091 0.684091 0.684091
+Ks 0.500000 0.500000 0.500000
+Ke 0.000000 0.000000 0.000000
+Ni 1.450000
+d 1.000000
+illum 3
+map_Kd ../textures/color-palette_0.png

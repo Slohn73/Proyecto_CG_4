@@ -9,7 +9,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Piso_Gradas.jpg
+map_Kd Textura_Ring/Textura_Piso_Gradas.png
 
 newmtl Textura_Cuerdas_Ring
 Ns 250.000000
@@ -19,7 +19,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Cuerdas_Ring.jpg
+map_Kd Textura_Ring/Textura_Cuerdas_Ring.jpg
 
 newmtl Textura_Esquina_Azul
 Ns 250.000000
@@ -29,7 +29,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Esquina_Azul.jpg
+map_Kd Textura_Ring/Textura_Esquina_Azul.jpg
 
 newmtl Textura_Esquina_Roja
 Ns 250.000000
@@ -39,7 +39,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Esquina_Roja.jpg
+map_Kd Textura_Ring/Textura_Esquina_Roja.jpg
 
 newmtl Textura_Piso_Ring
 Ns 250.000000
@@ -49,7 +49,7 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Piso_Ring.jpg
+map_Kd Textura_Ring/Textura_Piso_Ring.jpg
 
 newmtl Textura_Poste_Ring
 Ns 250.000000
@@ -59,4 +59,4 @@ Ke 0.000000 0.000000 0.000000
 Ni 1.500000
 d 1.000000
 illum 2
-map_Kd Texturas/Textura_Postes_Ring.jpg
+map_Kd Textura_Ring/Textura_Postes_Ring.jpg
