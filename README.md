@@ -39,6 +39,41 @@ más rápido que Debug al cargar.
 | F4 | Volver a mostrar todos los objetos |
 | F12 | Guardar captura `captura_N.png` |
 
+## Animaciones del espectador E
+
+El espectador E está sentado en `(0, 0, 6.9)`, detrás de la cámara con tripié y junto
+al espectador de camisa azul. Tiene una botella de cerveza en cada mano. Para verlo,
+seleccionar la vista **2**, girar hacia el público con el mouse y ajustar la posición
+con **W A S D**.
+
+- **Z — Lanzar:** el antebrazo izquierdo gira alrededor del codo sobre los ejes X e Y,
+  mientras la mano y la botella acompañan el movimiento. El brazo superior permanece
+  quieto. La botella se suelta a los **0.70 s**, gira en el aire y sigue una parábola
+  hacia el mismo destino del burrito en el ring. El vuelo dura **1.25 s**; al terminar
+  se oculta y se repone en la mano para poder repetir el lanzamiento.
+- **X — Beber:** el brazo derecho gira alrededor del hombro; el antebrazo, la mano y
+  la botella lo siguen. Sube durante **0.9 s**, mantiene la botella cerca de la boca
+  e incluye una inclinación de sorbo durante **1 s**, y baja durante **0.9 s**.
+
+Las dos acciones pueden ejecutarse a la vez. Pulsar de nuevo la misma tecla durante
+su animación no la reinicia. Los movimientos se actualizan con `deltaTime` y regresan
+a la postura de reposo al terminar. El lanzamiento no incluye colisiones ni rebotes.
+
+### Archivos y parámetros
+
+- `luchaLibreCompuG/luchaLibreCompuG/ArenaLayout.h`: registra las piezas y la cerveza,
+  y coloca al personaje mediante `posicionE` en `BuildArena`.
+- `luchaLibreCompuG/luchaLibreCompuG/luchaLibreCompuG.cpp`: contiene los pivotes
+  `CODO_IZQ` y `HOMBRO_DER`, los puntos de agarre, la lógica de `Animation()` y las
+  teclas de `KeyCallback`. `SUELTA_CERVEZA` controla el instante de suelta y
+  `ALTURA_CERVEZA` la elevación adicional de la trayectoria, actualmente **2.5 m**.
+- `modelos/modelos_propios/espectador_E_separado/`: contiene siete piezas OBJ
+  (cuerpo, dos brazos, dos antebrazos y dos manos) y sus materiales, conservando
+  el origen común para ensamblarlas.
+- `modelos/modelos_propios/botella_libre/`: contiene el OBJ de la botella, sus
+  materiales y la textura `etiqueta_libre.png`. Las rutas de modelos son relativas
+  al directorio de ejecución `luchaLibreCompuG/luchaLibreCompuG/`.
+
 ## Dónde se modifica la escena
 
 Todo está en **`luchaLibreCompuG/luchaLibreCompuG/ArenaLayout.h`**:
