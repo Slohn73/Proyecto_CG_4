@@ -639,7 +639,7 @@ inline void BuildLightRig(LightRig& rig, Scene& scene, std::vector<LightFixture>
 }
 
 // -------------------------------------------------------------------------------------
-//  4. Vistas de cámara (teclas 1-6; R vuelve a la primera)
+//  4. Vistas de cámara (teclas 1-8; R vuelve a la primera)
 // -------------------------------------------------------------------------------------
 struct CameraView
 {
@@ -657,6 +657,11 @@ inline std::vector<CameraView> GetCameraViews()
 		{ "Desde el publico", glm::vec3(-12.0f, 3.6f, 0.5f), glm::vec3(0.0f, 1.5f, 0.0f) },
 		{ "Cenital", glm::vec3(0.01f, 34.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f) },
 		{ "Mesa de comentaristas", glm::vec3(-3.4f, 1.9f, 5.6f), glm::vec3(-4.5f, 0.85f, -0.5f) },
+		// 7: espectador E de frente, desde el lado del ring y por encima de la barrera (teclas X y Z)
+		{ "Espectador E", glm::vec3(-0.2f, 1.8f, 5.45f), glm::vec3(-0.1f, 1.05f, 6.9f) },
+		// 8: luchadores y árbitro de cuerpo completo; alta para que la cuerda cercana quede fuera
+		//    del cuadro y se vea la lona donde caen el burrito y la cerveza (T, Space, B, Z)
+		{ "Ring de cerca", glm::vec3(0.3f, 4.6f, 4.0f), glm::vec3(0.3f, 1.8f, -0.3f) },
 	};
 }
 

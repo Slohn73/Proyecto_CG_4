@@ -12,7 +12,7 @@
 
  Opciones de línea de comandos (útiles para revisar la escena sin interacción):
    --galeria                 una instancia de cada modelo en fila, en lugar de la arena
-   --vista N                 vista inicial (1-6)
+   --vista N                 vista inicial (1-8)
    --camara x y z yaw pitch  posición y orientación inicial de la cámara
    --depuracion              muestra cuadrícula, ejes y cajas envolventes
    --captura archivo.png     guarda una imagen del primer cuadro estable y termina
@@ -1322,7 +1322,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 	if (action == GLFW_PRESS) {
 		// ---- Cámara ----
-		// R: regresar a la vista inicial; 1-6: vistas predefinidas
+		// R: regresar a la vista inicial; 1-8: vistas predefinidas
 		if (key == GLFW_KEY_R)
 			ApplyCameraView(0);
 		if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9 && key - GLFW_KEY_1 < (int)cameraViews.size())

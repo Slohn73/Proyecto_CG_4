@@ -24,6 +24,8 @@ más rápido que Debug al cargar.
 | Rueda del mouse | Zoom |
 | R | Regresar a la vista inicial |
 | 1 – 6 | Vistas: general, ring, entrada, desde el público, cenital, mesa de comentaristas |
+| 7 | Vista del espectador E de frente: para ver X (beber) y Z (lanzar la cerveza) |
+| 8 | Ring de cerca: luchadores y árbitro de cuerpo completo, y la lona donde caen el burrito y la cerveza (T, Espacio, B, Z) |
 | C | Liberar / capturar el cursor |
 | B | Un espectador de las gradas norte lanza un burrito al ring (tiro parabólico con g = 9.81 m/s²); cae acostado, queda en la lona y se encoge. No se reinicia a mitad del vuelo |
 | Z | El espectador E (primera fila norte) arma el brazo izquierdo sobre la cabeza y lanza su cerveza al ring; la botella cae acostada en la lona, se encoge y le aparece otra en la mano |
