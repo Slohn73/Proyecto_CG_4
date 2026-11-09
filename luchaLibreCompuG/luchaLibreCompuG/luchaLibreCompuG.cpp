@@ -295,6 +295,10 @@ int main(int argc, char** argv)
 	Shader skyboxShader("Shaders/skybox.vs", "Shaders/skybox.frag");
 	DebugDraw debugDraw;
 
+	// Consola: solo se muestran las teclas que animan objetos. Los mensajes de carga y configuración
+	// se silencian hasta que empieza el bucle principal.
+	std::streambuf* consola = std::cout.rdbuf(nullptr);
+
 	// Vértices del cubo para el Skybox
 	float skyboxVertices[] = {
 		// Positions
@@ -445,6 +449,8 @@ int main(int argc, char** argv)
 	ApplyCameraView(initialView);
 	if (customCamera)
 		camera.SetPose(camPos, camYaw, camPitch);
+
+	std::cout.rdbuf(consola);
 
 	int framesRendered = 0;
 	int captureView = initialView < 0 ? 0 : initialView;
@@ -622,7 +628,7 @@ int main(int argc, char** argv)
 	}
 
 	double elapsed = glfwGetTime() - loopStart;
-	if (framesRendered > 0 && elapsed > 0.0)
+	if (runSeconds > 0.0 && framesRendered > 0 && elapsed > 0.0)
 		std::cout << "Rendimiento: " << framesRendered << " cuadros en " << elapsed << " s (" << framesRendered / elapsed << " fps promedio)" << std::endl;
 
 	glfwTerminate();
@@ -1005,7 +1011,6 @@ void ApplyCameraView(int index)
 	const CameraView& v = cameraViews[index];
 	camera.SetPose(v.position, 0.0f, 0.0f);
 	camera.LookAt(v.target);
-	std::cout << "Vista " << index + 1 << ": " << v.name << std::endl;
 }
 
 // Recorre los objetos de la escena para inspeccionarlos (Tab / Shift+Tab)
@@ -1173,9 +1178,6 @@ void PrepararTiroCerveza()
 	float pi = glm::pi<float>();
 	tiro.vueltas = acostada + pi * ceilf((glm::radians(450.0f) - acostada) / pi);
 	tiro.listo = true;
-	std::cout << "Cerveza (Z): sale a " << glm::length(tiro.velocidad) << " m/s con " << tiro.elevacion
-		<< " grados (la mano va a " << tiro.rapidezMano << " m/s y " << elev << " grados), vuela "
-		<< tiro.duracion << " s y gira " << glm::degrees(tiro.vueltas) << " grados" << std::endl;
 }
 
 // Lógica de animaciones automáticas y por código.
@@ -1341,21 +1343,21 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 		if (key == GLFW_KEY_B && !burritoLanzado) {
 			burritoLanzado = true;
 			tiempoVueloBurrito = 0.0f;
-			std::cout << "Burrito: lanzado desde las gradas" << std::endl;
+			std::cout << "Tecla B: burrito -> vuela de las gradas al ring" << std::endl;
 		}
 
 		// Z: el espectador E lanza la cerveza con el brazo izquierdo (no se reinicia a mitad del tiro)
 		if (key == GLFW_KEY_Z && !lanzandoCerveza) {
 			lanzandoCerveza = true;
 			tiempoLanzamiento = 0.0f;
-			std::cout << "Espectador E: lanza la cerveza" << std::endl;
+			std::cout << "Tecla Z: espectador E (brazo izquierdo) y su cerveza -> lanza la cerveza" << std::endl;
 		}
 
 		// X: el espectador E sube la botella derecha a la boca y bebe
 		if (key == GLFW_KEY_X && !bebiendo) {
 			bebiendo = true;
 			tiempoBebida = 0.0f;
-			std::cout << "Espectador E: bebe" << std::endl;
+			std::cout << "Tecla X: espectador E (brazo derecho) y su cerveza -> bebe" << std::endl;
 		}
 
 		// Input 2: Cambiar color de luces en tiempo real al presionar 'L'
@@ -1364,6 +1366,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 			colorLuzSpot = luzEscenarioActiva ? glm::vec3(1.0f, 0.2f, 0.2f) : glm::vec3(0.2f, 0.2f, 1.0f);
 			for (PointLightParams& light : lightRig.pointLights)
 				light.diffuse = colorLuzSpot;
+			std::cout << "Tecla L: luces del escenario -> cambian a " << (luzEscenarioActiva ? "rojo" : "azul") << std::endl;
 		}
 
 		// Input 3: animación del árbitro con la tecla 'T' (antes era 'A', que también mueve la
@@ -1371,16 +1374,15 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 		if (key == GLFW_KEY_T)
 		{
 			if (combate.Ocupado())
-				std::cout << "Arbitro: espera a que termine el combate" << std::endl;
+				std::cout << "Tecla T: arbitro -> espera a que termine el combate" << std::endl;
 			else if (arbitro.Iniciar())
-				std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
+				std::cout << "Tecla T: arbitro -> inicia su animacion" << std::endl;
 		}
 
 		// Input 4: combate con la barra espaciadora. Repetir la tecla durante el combate no lo reinicia;
 		// si el árbitro está en su secuencia, el combate empieza cuando él termina.
 		if (key == GLFW_KEY_SPACE && combate.Solicitar())
-			std::cout << (arbitro.Activa() ? "Combate: en espera, inicia cuando el arbitro termine" : "Combate: inicia")
-				<< " (" << combate.Duracion() << " s)" << std::endl;
+			std::cout << "Tecla Espacio: luchadores -> " << (arbitro.Activa() ? "el combate inicia cuando el arbitro termine" : "inicia el combate") << std::endl;
 
 		// ---- Depuración ----
 		if (key == GLFW_KEY_F1) showDebugGrid = !showDebugGrid;
