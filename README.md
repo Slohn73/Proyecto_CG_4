@@ -26,6 +26,8 @@ más rápido que Debug al cargar.
 | 1 – 6 | Vistas: general, ring, entrada, desde el público, cenital, mesa de comentaristas |
 | C | Liberar / capturar el cursor |
 | B | Lanzar el burrito desde el público al ring |
+| Z | El espectador E lanza su cerveza con el antebrazo izquierdo; se repone al terminar |
+| X | El espectador E levanta el brazo derecho para beber y lo baja |
 | L | Cambiar el color de las luces |
 | T | Animación del árbitro (antes era A, que choca con mover la cámara) |
 | Espacio | Ataque del luchador |

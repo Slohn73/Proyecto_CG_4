@@ -1,0 +1,33 @@
+newmtl vidrio
+Ka 0.1 0.1 0.08
+Kd 0.82 0.89 0.70
+Ks 0.9 0.9 0.9
+Ns 180
+d 0.22
+Ni 1.45
+illum 2
+
+newmtl cerveza
+Kd 0.75 0.35 0.025
+Ks 0.4 0.3 0.1
+Ns 70
+d 1
+illum 2
+
+newmtl etiqueta
+Kd 1 1 1
+map_Kd etiqueta_libre.png
+d 1
+illum 2
+
+newmtl metal
+Kd 0.72 0.57 0.27
+Ks 0.9 0.8 0.5
+Ns 150
+illum 2
+
+newmtl dorado
+Kd 0.13 0.23 0.34
+Ks 0.5 0.5 0.5
+Ns 80
+illum 2

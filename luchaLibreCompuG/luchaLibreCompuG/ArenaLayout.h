@@ -76,8 +76,17 @@ inline void RegisterArenaAssets(Scene& scene)
 {
 	const std::string P = "modelos/modelos_propios/";
 	const std::string I = "modelos/modelos_importados/";
-
+	
 	AssetDesc a;
+	// Cerveza de marca blanca
+	a.id = "cerveza_E"; a.path = P + "botella_libre/botella_libre.obj";a.pivot = Pivot::Original;
+	scene.RegisterAsset(a);
+
+	//Integracion Espectador separado en partes
+	const char* piezasE[] = {
+		"cuerpo","brazo_derecho","antebrazo_derecho","mano_derecha",
+		"brazo_izquierdo","antebrazo_izquierdo","mano_izquierda"
+	};
 
 	// Piso de la arena: no existe como modelo, se genera un plano de 44 x 44 m
 	a = AssetDesc(); a.id = "piso"; a.path = "(generado)"; a.pivot = Pivot::Original;
@@ -159,6 +168,15 @@ inline void RegisterArenaAssets(Scene& scene)
 	for (char c = 'A'; c <= 'F'; c++)
 	{
 		a = AssetDesc(); a.id = std::string("espectador_") + c; a.path = I + "espectador/espectador_" + c + ".obj";
+		a.pivot = Pivot::Original;
+		scene.RegisterAsset(a);
+	}
+
+	//Agregamos al espectador separado por partes
+
+	for (const char* pieza : piezasE) {
+		a = AssetDesc(); a.id = std::string("E_anim_") + pieza;
+		a.path = std::string("modelos/modelos_propios/espectador_E_separado/espectador_E_") + pieza + ".obj";
 		a.pivot = Pivot::Original;
 		scene.RegisterAsset(a);
 	}
@@ -472,6 +490,19 @@ inline void BuildArena(Scene& scene)
 	BURRITO_INICIO = glm::vec3(2.0f, 2.4f, GRADAS_FRENTE + 2.5f);
 	BURRITO_FIN = glm::vec3(0.0f, lona + 0.05f, 0.0f);
 	scene.Add("burrito", "burrito", "accesorios").At(BURRITO_INICIO).Hidden();
+
+	// ---------------- Espectador por partes
+	const glm::vec3 posicionE(0.0f, 0.0f, 6.9f);
+	scene.Add("E_cerveza_izquierda", "cerveza_E", "primera_fila").At(posicionE).RotY(180.0f);
+	scene.Add("E_cerveza_derecha", "cerveza_E", "primera_fila").At(posicionE).RotY(180.0f);
+	const char* partesE[] = {
+		"cuerpo","brazo_derecho","antebrazo_derecho","mano_derecha",
+		"brazo_izquierdo","antebrazo_izquierdo","mano_izquierda"
+	};
+	for (const char* parte : partesE) {
+		const std::string id = std::string("E_anim_") + parte;
+		scene.Add(id, id, "primera_fila").At(posicionE).RotY(180.0f);
+	}
 }
 
 // -------------------------------------------------------------------------------------
