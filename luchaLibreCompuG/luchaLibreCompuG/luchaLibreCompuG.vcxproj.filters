@@ -56,6 +56,9 @@
     <ClInclude Include="AnimacionArbitro.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="AnimacionCombate.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ArenaLayout.h">
       <Filter>Header Files</Filter>
     </ClInclude>

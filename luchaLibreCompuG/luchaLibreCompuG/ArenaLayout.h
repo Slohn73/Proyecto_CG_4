@@ -46,7 +46,8 @@ namespace Arena
 }
 
 // Trayectoria del burrito volador (tecla B): desde el público hasta la lona del ring.
-// Se recalculan en BuildArena con la altura real de las gradas y de la lona.
+// Se recalculan en BuildArena con la altura real de las gradas y de la lona (BURRITO_FIN.y es la
+// superficie de la lona; la cerveza que lanza el espectador E también cae ahí cerca).
 inline glm::vec3 BURRITO_INICIO(4.0f, 2.5f, 11.0f);
 inline glm::vec3 BURRITO_FIN(0.0f, 1.3f, 0.0f);
 const float BURRITO_ALTURA = 3.0f;
@@ -146,10 +147,12 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.targetHeight = 1.85f;
 	a.options.excludeNodes = { "Entorno" };   // El archivo incluye una esquina de ring de muestra
 	a.options.diffuseOverrides = { { "LuchadorMat", "Luchador_Diffuse.png" } };
+	a.options.skinning = true;   // Esqueleto Mixamo: la animación de combate (Space) mueve sus huesos por código
 	scene.RegisterAsset(a);
 
 	a = AssetDesc(); a.id = "penta"; a.path = I + "penta/source/Taunt.fbx";
 	a.targetHeight = 1.80f;
+	a.options.skinning = true;   // El clip "Taunt" que trae el archivo no se usa
 	scene.RegisterAsset(a);
 
 	// Árbitro (1.89 m): el FBX original (source/) no tiene esqueleto. Para animar la señal de la
@@ -516,7 +519,8 @@ inline void BuildArena(Scene& scene)
 
 	// ---------------- Burrito volador: sale de un espectador de las gradas norte hacia la lona
 	BURRITO_INICIO = glm::vec3(2.0f, 2.4f, GRADAS_FRENTE + 2.5f);
-	BURRITO_FIN = glm::vec3(0.0f, lona + 0.05f, 0.0f);
+	// Punto de la lona donde cae: fuera de la línea por donde caminan los luchadores (z = 0) y del árbitro
+	BURRITO_FIN = glm::vec3(0.3f, lona, 1.0f);
 	scene.Add("burrito", "burrito", "accesorios").At(BURRITO_INICIO).Hidden();
 
 	// ---------------- Espectador por partes
@@ -635,7 +639,7 @@ inline void BuildLightRig(LightRig& rig, Scene& scene, std::vector<LightFixture>
 }
 
 // -------------------------------------------------------------------------------------
-//  4. Vistas de cámara (teclas 1-6; R vuelve a la primera)
+//  4. Vistas de cámara (teclas 1-8; R vuelve a la primera)
 // -------------------------------------------------------------------------------------
 struct CameraView
 {
@@ -653,6 +657,11 @@ inline std::vector<CameraView> GetCameraViews()
 		{ "Desde el publico", glm::vec3(-12.0f, 3.6f, 0.5f), glm::vec3(0.0f, 1.5f, 0.0f) },
 		{ "Cenital", glm::vec3(0.01f, 34.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f) },
 		{ "Mesa de comentaristas", glm::vec3(-3.4f, 1.9f, 5.6f), glm::vec3(-4.5f, 0.85f, -0.5f) },
+		// 7: espectador E de frente, desde el lado del ring y por encima de la barrera (teclas X y Z)
+		{ "Espectador E", glm::vec3(-0.2f, 1.8f, 5.45f), glm::vec3(-0.1f, 1.05f, 6.9f) },
+		// 8: luchadores y árbitro de cuerpo completo; alta para que la cuerda cercana quede fuera
+		//    del cuadro y se vea la lona donde caen el burrito y la cerveza (T, Space, B, Z)
+		{ "Ring de cerca", glm::vec3(0.3f, 4.6f, 4.0f), glm::vec3(0.3f, 1.8f, -0.3f) },
 	};
 }
 

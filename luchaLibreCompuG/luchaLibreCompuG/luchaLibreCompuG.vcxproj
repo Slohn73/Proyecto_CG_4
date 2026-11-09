@@ -24,6 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AnimacionArbitro.h" />
+    <ClInclude Include="AnimacionCombate.h" />
     <ClInclude Include="ArenaLayout.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="DebugDraw.h" />
@@ -90,6 +91,11 @@
     <Manifest>
       <EnableSegmentHeap>true</EnableSegmentHeap>
     </Manifest>
+    <PostBuildEvent>
+      <!-- La assimp-vc140-mt.dll junto al proyecto es la de Release (la que se distribuye). Debug usa su DLL
+           de depuracion original, copiada junto al EXE de Debug (el directorio del EXE se busca primero). -->
+      <Command>copy /Y "$(SolutionDir)External Libraries\assimp\lib\assimp-vc140-mt.dll" "$(OutDir)assimp-vc140-mt.dll" &gt;nul</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
