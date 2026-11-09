@@ -35,6 +35,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <fstream>
 #include <thread>
 #include <chrono>
 #include <unordered_map>
@@ -66,6 +67,42 @@
 #include "ArenaLayout.h"
 #include "AnimacionArbitro.h"
 #include "AnimacionCombate.h"
+
+// Distribución: el EXE se abre con doble clic desde cualquier carpeta de trabajo ---------------
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#undef APIENTRY   // GLFW ya la definió; windows.h la vuelve a definir igual
+#include <windows.h>
+
+// Todos los recursos (Shaders/, Skybox/, modelos/) se cargan con rutas relativas. Si junto al EXE
+// existe la carpeta Shaders/, se usa la carpeta del EXE como directorio de trabajo; así el programa
+// funciona con doble clic, desde un acceso directo o desde otra consola. Si no existe (por ejemplo
+// Release\luchaLibreCompuG.exe), se conserva el directorio de trabajo actual, que es el que
+// establece Visual Studio (luchaLibreCompuG/luchaLibreCompuG/).
+static void UsarCarpetaDelEjecutable()
+{
+	wchar_t ruta[32768];
+	DWORD n = GetModuleFileNameW(nullptr, ruta, 32768);
+	if (n == 0 || n >= 32768) return;
+	std::wstring carpeta(ruta, n);
+	size_t barra = carpeta.find_last_of(L"\\/");
+	if (barra == std::wstring::npos) return;
+	carpeta.resize(barra);
+	if (GetFileAttributesW((carpeta + L"\\Shaders\\lighting.vs").c_str()) != INVALID_FILE_ATTRIBUTES)
+		SetCurrentDirectoryW(carpeta.c_str());
+}
+
+// Con doble clic la consola se cierra sola: los errores fatales también se muestran en un cuadro.
+static void MostrarErrorFatal(const char* mensaje)
+{
+	std::cout << mensaje << std::endl;
+	MessageBoxA(nullptr, mensaje, "Proyecto Final CG: Lucha Libre Mexicana", MB_OK | MB_ICONERROR);
+}
+#else
+static void UsarCarpetaDelEjecutable() {}
+static void MostrarErrorFatal(const char* mensaje) { std::cout << mensaje << std::endl; }
+#endif
 
 // Prototipos de funciones
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -250,6 +287,18 @@ int main(int argc, char** argv)
 		}
 	}
 
+	// Los recursos se buscan junto al EXE (distribución) o en el directorio de trabajo (Visual Studio)
+	UsarCarpetaDelEjecutable();
+	{
+		std::ifstream prueba("Shaders/lighting.vs", std::ios::binary);
+		if (!prueba)
+		{
+			MostrarErrorFatal("No se encontro la carpeta de recursos (Shaders, Skybox, modelos).\n"
+				"Ejecuta el programa desde luchaLibreCompuG/luchaLibreCompuG/ (junto a esas carpetas).");
+			return EXIT_FAILURE;
+		}
+	}
+
 	// Inicialización de GLFW
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -263,7 +312,7 @@ int main(int argc, char** argv)
 
 	if (nullptr == window)
 	{
-		std::cout << "Error al crear la ventana de GLFW" << std::endl;
+		MostrarErrorFatal("Error al crear la ventana de GLFW: se requiere una GPU y un controlador con OpenGL 3.3 o superior.");
 		glfwTerminate();
 		return EXIT_FAILURE;
 	}

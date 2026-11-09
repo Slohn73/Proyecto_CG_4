@@ -13,6 +13,49 @@ Escena 3D de una arena de lucha libre en C++ con OpenGL 3.3, GLFW, GLEW, GLM, As
 La carga de modelos tarda unos 20 s (más si la laptop está en batería). Release es notablemente
 más rápido que Debug al cargar.
 
+## Ejecutar sin Visual Studio
+
+El repositorio incluye el ejecutable **Release | Win32** ya compilado; no hace falta compilar nada.
+
+- **Dónde está:** `luchaLibreCompuG/luchaLibreCompuG/luchaLibreCompuG.exe`. Esa carpeta ya contiene
+  `Shaders/`, `Skybox/`, `modelos/` y las DLL (`glew32.dll`, `assimp-vc140-mt.dll`) que el EXE necesita.
+  Hay que conservarlas juntas: se puede copiar o mover la carpeta completa, pero no el EXE solo.
+- **Cómo abrirlo:** clonar o descargar la rama `entrega/laboratorio` y hacer doble clic en el EXE.
+  El programa toma como carpeta de recursos la del propio EXE, así que no importa desde dónde se abra
+  (Explorador, acceso directo o consola). Se abre una ventana de consola (informa de la carga) y la
+  ventana de la arena; la carga tarda unos 20 s. Si no encuentra los recursos o la tarjeta gráfica no
+  soporta OpenGL 3.3, muestra un cuadro con el motivo.
+- **Requisitos:** Windows 10 u 11 (el EXE es de 32 bits y funciona en Windows de 32 y 64 bits), una GPU
+  con controlador OpenGL 3.3 o superior y el **Microsoft Visual C++ Redistributable 2015-2022 (x86)**
+  (aporta `MSVCP140.dll` y `VCRUNTIME140.dll`; [descarga oficial](https://aka.ms/vs/17/release/vc_redist.x86.exe)).
+  No se distribuye con el repositorio; la mayoría de los equipos con juegos o programas recientes ya lo
+  tiene. No se requiere Visual Studio ni la carpeta `Debug`.
+- **Teclas principales:** W A S D / flechas y mouse para moverse, Shift para ir más rápido,
+  **1 – 8** para las vistas de cámara, **L** cambia el color de las luces y las cinco animaciones:
+  **T** árbitro, **Espacio** combate, **B** burrito, **X** espectador bebiendo y **Z** espectador
+  lanzando la cerveza. La tabla completa está en *Controles*.
+- **Regresar a la vista inicial:** tecla **R**.
+- **Cerrar:** tecla **Esc** o el botón de cerrar de la ventana (también se cierra al cerrar la consola).
+  F12 guarda una captura `captura_N.png` en la carpeta del EXE.
+
+### Volver a generar el ejecutable Release
+
+Con Visual Studio (carga de trabajo de C++, toolset v145) instalado, desde la raíz del repositorio:
+
+```
+powershell -ExecutionPolicy Bypass -File luchaLibreCompuG/luchaLibreCompuG/herramientas/construir_distribucion.ps1
+```
+
+El script compila Release | Win32 con MSBuild, copia `Release\luchaLibreCompuG.exe` a
+`luchaLibreCompuG/luchaLibreCompuG/luchaLibreCompuG.exe` y verifica con `dumpbin` que el EXE y las DLL
+no dependen de los runtimes de depuración (`MSVCP140D`, `VCRUNTIME140D`, `ucrtbased`) y que no falta
+ninguna DLL. Con `-SinCompilar` solo copia y verifica. Después, para volver a probar la distribución
+en una carpeta aparte (sin acceso a las carpetas de desarrollo):
+
+```
+powershell -ExecutionPolicy Bypass -File luchaLibreCompuG/luchaLibreCompuG/herramientas/probar_distribucion.ps1
+```
+
 ## Controles
 
 | Tecla | Acción |
