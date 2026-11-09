@@ -30,7 +30,7 @@ más rápido que Debug al cargar.
 | X | El espectador E levanta el brazo derecho para beber y lo baja |
 | L | Cambiar el color de las luces |
 | T | El árbitro se acerca al centro, observa a los luchadores, da la señal de inicio con el brazo derecho y regresa a su lugar (se ve en la vista 2; se puede repetir al terminar) |
-| Espacio | Ataque del luchador |
+| Espacio | Combate: el luchador camina hacia Penta y le da un golpe al pecho; Penta reacciona y ambos regresan. No se reinicia si se repite la tecla; si el árbitro está en su secuencia, el combate espera a que termine (y T se ignora durante el combate) |
 | F1 | Cuadrícula de 1 m y ejes (X rojo, Y verde, Z azul) |
 | F2 | Cajas envolventes de todos los objetos |
 | Tab / Shift+Tab | Seleccionar objeto (caja amarilla; su posición aparece en el título de la ventana) |
@@ -70,6 +70,9 @@ luchaLibreCompuG.exe --captura-todas prefijo   # una imagen por vista
 luchaLibreCompuG.exe --segundos 10             # termina tras N s e informa los FPS
 luchaLibreCompuG.exe --vista 2 --prueba-arbitro arbitro   # corre 2 veces la animación T, guarda capturas y mide holguras
 luchaLibreCompuG.exe --limitar-fps 20          # limita los FPS (para comprobar que las animaciones no dependen de ellos)
+luchaLibreCompuG.exe --camara 0.3 2.25 2.8 -90 -3 --prueba-combate combate   # corre 2 veces el combate, capturas y mediciones
+luchaLibreCompuG.exe --camara 0.3 2.25 2.8 -90 -3 --video-combate carpeta    # cuadros del combate a 30 por segundo
+luchaLibreCompuG.exe --congelar-combate 3.05    # muestra el combate detenido en ese instante
 ```
 
 ## Modelos convertidos
@@ -83,3 +86,8 @@ originales no se modificaron.
 El árbitro no tiene esqueleto; para la señal de la tecla T se separó su brazo derecho (con la
 manga) en `arbitro-ruper-design/separado/` con `herramientas/separar_arbitro.py`, sin cambiar la
 geometría. La animación y sus parámetros están en `AnimacionArbitro.h`.
+
+Los dos luchadores (`Luchador_001.fbx` y `Taunt.fbx`) traen esqueleto Mixamo. Se cargan con
+`ModelOptions::skinning`: el motor lee huesos y pesos, `AnimacionCombate.h` calcula el giro de cada
+articulación por código y `Shaders/lighting.vs` deforma la malla. Las animaciones que traen esos FBX
+no se usan y los archivos no se modificaron.

@@ -100,6 +100,9 @@ struct SceneObject
 	glm::vec3 pivotOffset = glm::vec3(0.0f);     // Punto local (m) que se coloca en position
 	bool visible = true;
 	glm::vec3 glowColor = glm::vec3(1.0f);       // Color de sus haces de luz (materiales glow); negro = apagado
+	// Pose del esqueleto de esta instancia (Model::ComputePose). Vacía = se dibuja en la pose de
+	// enlace, como un modelo estático. Solo la usan los recursos cargados con skinning.
+	std::vector<glm::mat4> skinPalette;
 	ModelAsset* asset = nullptr;
 
 	glm::mat4 GetMatrix() const
@@ -314,6 +317,7 @@ private:
 		GLint modelLoc = glGetUniformLocation(shader.Program, "model");
 		GLint normalLoc = glGetUniformLocation(shader.Program, "normalMatrix");
 		GLint glowLoc = glGetUniformLocation(shader.Program, "objectGlow");
+		GLint bonesLoc = glGetUniformLocation(shader.Program, "bones");
 		for (const SceneObject& obj : this->objects)
 		{
 			if (!obj.visible || !obj.asset || !obj.asset->IsReady()) continue;
@@ -323,7 +327,10 @@ private:
 			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 			glUniformMatrix3fv(normalLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
 			glUniform3fv(glowLoc, 1, glm::value_ptr(obj.glowColor));
-			obj.asset->model->Draw(shader, pass);
+			bool skin = !obj.skinPalette.empty() && obj.skinPalette.size() <= (size_t)MAX_SKIN_BONES && bonesLoc >= 0;
+			if (skin)
+				glUniformMatrix4fv(bonesLoc, (GLsizei)obj.skinPalette.size(), GL_FALSE, glm::value_ptr(obj.skinPalette[0]));
+			obj.asset->model->Draw(shader, pass, skin);
 		}
 	}
 };

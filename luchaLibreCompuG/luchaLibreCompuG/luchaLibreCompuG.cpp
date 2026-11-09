@@ -21,6 +21,10 @@
    --prueba-arbitro prefijo  ejecuta dos veces la animación del árbitro (T), guarda capturas de sus
                              fases (prefijo_1_inicio.png, ...), mide holguras y termina
    --limitar-fps N           limita los cuadros por segundo (para comprobar la independencia de los FPS)
+   --prueba-combate prefijo  ejecuta dos veces el combate (Space), guarda capturas de sus fases y mide
+                             holguras con la malla deformada real; la segunda vez pide T y Space juntos
+   --video-combate carpeta   graba el combate cuadro por cuadro a 30 cuadros por segundo de animación
+   --congelar-combate t      muestra el combate detenido en el instante t (para revisar poses)
 */
 
 #include <iostream>
@@ -31,6 +35,7 @@
 #include <iomanip>
 #include <thread>
 #include <chrono>
+#include <unordered_map>
 
 // Librería GLEW
 #include <GL/glew.h>
@@ -56,6 +61,7 @@
 #include "DebugDraw.h"
 #include "ArenaLayout.h"
 #include "AnimacionArbitro.h"
+#include "AnimacionCombate.h"
 
 // Prototipos de funciones
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -68,6 +74,7 @@ void SelectObject(int direction);
 void UpdateWindowTitle(GLFWwindow* window);
 void SaveScreenshot(const std::string& file);
 void PruebaArbitro(const std::string& prefijo, GLFWwindow* window);
+void PruebaCombate(const std::string& prefijo, GLFWwindow* window);
 
 // Dimensiones de la ventana
 const GLuint WIDTH = 1280, HEIGHT = 720;
@@ -140,11 +147,17 @@ SceneObject* objCervezaMesa = nullptr;
 glm::vec3 baseCervezaMesa(0.0f);                     // Punto de la mesa donde se apoya
 
 // Estados de animación por teclado / input
-bool animacionLuchador1 = false;
 bool animacionPantalla = false;
 
 // Árbitro (T): se acerca, observa a los luchadores, da la señal de inicio y regresa (AnimacionArbitro.h)
 AnimacionArbitro arbitro;
+
+// Combate (Space): el luchador se acerca a Penta y le da un golpe al pecho; Penta reacciona
+// (AnimacionCombate.h). Mientras el árbitro está en su secuencia el combate espera, y T se ignora
+// durante el combate, para que nunca se crucen en el ring.
+AnimacionCombate combate;
+float limiteDeltaCombate = FLT_MAX;   // Solo pruebas: hace coincidir un cuadro con un instante exacto
+float deltaCombateFijo = 0.0f;        // Solo video: paso fijo de animación por cuadro
 
 int main(int argc, char** argv)
 {
@@ -157,7 +170,8 @@ int main(int argc, char** argv)
 	std::string captureFile;
 	std::string captureAllPrefix;
 	double runSeconds = 0.0;
-	std::string pruebaArbitro;
+	std::string pruebaArbitro, pruebaCombate, videoCombate;
+	float congelarCombate = -1.0f;
 	double limiteFps = 0.0;
 	for (int i = 1; i < argc; i++)
 	{
@@ -170,6 +184,9 @@ int main(int argc, char** argv)
 		else if (arg == "--segundos" && i + 1 < argc) runSeconds = atof(argv[++i]);
 		else if (arg == "--prueba-arbitro" && i + 1 < argc) pruebaArbitro = argv[++i];
 		else if (arg == "--limitar-fps" && i + 1 < argc) limiteFps = atof(argv[++i]);
+		else if (arg == "--prueba-combate" && i + 1 < argc) pruebaCombate = argv[++i];
+		else if (arg == "--video-combate" && i + 1 < argc) videoCombate = argv[++i];
+		else if (arg == "--congelar-combate" && i + 1 < argc) congelarCombate = (float)atof(argv[++i]);
 		else if (arg == "--camara" && i + 5 < argc)
 		{
 			customCamera = true;
@@ -333,6 +350,14 @@ int main(int argc, char** argv)
 	if (!arbitro.Inicializar(scene.Find("arbitro"), scene.Find("arbitro_brazo_derecho"),
 		scene.Find("luchador"), scene.Find("penta"), glm::vec3(0.0f)))
 		std::cout << "AVISO: no se encontro el arbitro; la tecla T no tendra efecto" << std::endl;
+	if (combate.Inicializar(scene.Find("luchador"), scene.Find("penta")))
+		std::cout << "Combate listo: golpe a " << combate.AvanceGolpe() << " m de avance; el brazo toca al rival al "
+			<< 100.0f * combate.FraccionImpacto() << " % del barrido (separacion " << combate.SeparacionImpacto() << " m), mano a "
+			<< combate.VelocidadImpacto() << " m/s, intensidad de la reaccion " << combate.Intensidad() << std::endl;
+	else
+		std::cout << "AVISO: los luchadores no tienen esqueleto; la barra espaciadora no tendra efecto" << std::endl;
+	if (congelarCombate >= 0.0f)
+		combate.Congelar(congelarCombate);
 
 	cameraViews = GetCameraViews();
 	if (galleryMode)
@@ -454,6 +479,19 @@ int main(int argc, char** argv)
 
 		if (!pruebaArbitro.empty() && framesRendered >= 3)
 			PruebaArbitro(pruebaArbitro, window);
+		if (!pruebaCombate.empty() && framesRendered >= 3)
+			PruebaCombate(pruebaCombate, window);
+		if (!videoCombate.empty() && framesRendered >= 3)
+		{
+			// Paso fijo de 1/30 s: el video dura lo mismo que la animación aunque guardar cada cuadro sea lento
+			static int cuadroVideo = 0, cola = 0;
+			if (cuadroVideo == 0) { combate.Solicitar(); deltaCombateFijo = 1.0f / 30.0f; }
+			char nombre[64];
+			snprintf(nombre, sizeof(nombre), "/cuadro_%04d.png", cuadroVideo++);
+			SaveScreenshot(videoCombate + nombre);
+			if (!combate.Ocupado() && ++cola > 15)
+				glfwSetWindowShouldClose(window, GL_TRUE);
+		}
 
 		glfwSwapBuffers(window);
 		if (limiteFps > 0.0)
@@ -587,6 +625,262 @@ void PruebaArbitro(const std::string& prefijo, GLFWwindow* window)
 	enCurso = false;
 }
 
+// --prueba-combate: reproduce dos veces el combate sin interacción, usando KeyCallback como si se
+// presionaran las teclas. En la primera guarda capturas de sus fases; en la segunda pide T y Space
+// a la vez (el combate debe esperar al árbitro) y vuelve a presionar T y Space durante el combate
+// (deben ignorarse). En cada cuadro deforma en la CPU todos los vértices de ambos luchadores (la
+// misma fórmula que lighting.vs) y mide: altura sobre la lona, distancia a las cuerdas y postes
+// reales del ring, distancia entre los dos cuerpos, distancia al árbitro y la separación de la
+// brazo del atacante con el rival en el instante del impacto.
+void PruebaCombate(const std::string& prefijo, GLFWwindow* window)
+{
+	using namespace CombateParams;
+	struct Captura { float t; const char* nombre; };
+	static const Captura capturas[] = { { T_GUARDIA, "guardia" }, { T_PROVOCA, "provoca" }, { 1.9f, "camina" },
+		{ T_PREPARA, "prepara" }, { T_IMPACTO, "impacto" }, { T_IMPACTO + 0.15f, "reaccion" },
+		{ T_IMPACTO + 0.8f, "dolor_y_celebracion" }, { T_IMPACTO + 1.5f, "sacude_cabeza" }, { 6.0f, "regreso" } };
+	const int NUM_CAPTURAS = (int)(sizeof(capturas) / sizeof(capturas[0]));
+	static SceneObject* A = scene.Find("luchador");
+	static SceneObject* B = scene.Find("penta");
+	static SceneObject* ring = scene.Find("ring");
+	static SceneObject* arbCuerpo = scene.Find("arbitro");
+	static SceneObject* arbBrazo = scene.Find("arbitro_brazo_derecho");
+	if (!A || !B || !ring || !A->asset->model->HasSkeleton() || !B->asset->model->HasSkeleton())
+	{
+		std::cout << "[Prueba combate] faltan los luchadores con esqueleto" << std::endl;
+		glfwSetWindowShouldClose(window, GL_TRUE);
+		return;
+	}
+	static const glm::vec3 posA0 = A->position, rotA0 = A->rotation, posB0 = B->position, rotB0 = B->rotation;
+	static int repeticion = 0, siguiente = 0, cuadros = 0;
+	static bool enCurso = false, pulsoDurante = false;
+	static double inicio = 0.0, inicioReal = 0.0;
+	static float minPiso = FLT_MAX, minCuerdas = FLT_MAX, minEntre = FLT_MAX, tMinEntre = 0.0f, brechaImpacto = FLT_MAX;
+	static float minArbitro = FLT_MAX, maxVel = 0.0f, maxVelVertice = 0.0f, tMaxVelVertice = 0.0f, maxVelFuera = 0.0f, tMaxVelFuera = 0.0f;
+	static int dentroPostes = 0, dentroArbitro = 0, verticesDentro = 0;
+	static float maxPenetracion = 0.0f, tPenetracion = 0.0f;
+	static glm::vec3 antA = posA0, antB = posB0;
+
+	// Cuerdas y postes del ring en el mundo (partes del modelo Ring.obj)
+	static std::vector<std::pair<glm::vec3, glm::vec3>> cuerdas, postes;
+	static float limiteCuerdas = FLT_MAX;
+	if (cuerdas.empty())
+	{
+		for (const MeshPart& part : ring->asset->model->GetParts())
+		{
+			glm::vec3 mn, mx;
+			TransformBounds(ring->GetMatrix(), part.boundsMin, part.boundsMax, mn, mx);
+			if (part.name.rfind("Cylinder", 0) == 0)
+			{
+				cuerdas.push_back({ mn, mx });
+				glm::vec3 d = mx - mn;
+				float interior = d.x > d.z ? std::min(fabsf(mn.z), fabsf(mx.z)) : std::min(fabsf(mn.x), fabsf(mx.x));
+				limiteCuerdas = std::min(limiteCuerdas, interior);
+			}
+			else if (part.name.rfind("Poste", 0) == 0)
+				postes.push_back({ mn, mx });
+		}
+		std::cout << "[Prueba combate] " << cuerdas.size() << " cuerdas (cara interior a " << limiteCuerdas << " m del centro), "
+			<< postes.size() << " postes" << std::endl;
+	}
+
+	auto pulsar = [&](int tecla) { KeyCallback(window, tecla, 0, GLFW_PRESS, 0); KeyCallback(window, tecla, 0, GLFW_RELEASE, 0); };
+
+	if (!enCurso)
+	{
+		if (repeticion == 0)
+			SaveScreenshot(prefijo + "_01_inicio.png");
+		if (repeticion == 2)
+		{
+			std::cout << std::fixed << std::setprecision(3)
+				<< "[Prueba combate] punto mas bajo de ambas mallas respecto a la lona: " << minPiso << " m\n"
+				<< "[Prueba combate] holgura minima con la cara interior de las cuerdas: " << minCuerdas << " m; vertices dentro de los postes: " << dentroPostes << "\n"
+				<< "[Prueba combate] distancia minima entre los cuerpos fuera del contacto: "
+				<< (minEntre == FLT_MAX ? std::string("mas de 0.25") : std::to_string(minEntre)) << " m (t = " << tMinEntre << " s)\n"
+				<< "[Prueba combate] separacion brazo-rival en el impacto: " << brechaImpacto << " m\n"
+				<< "[Prueba combate] vertices de un luchador dentro del otro (> 5 mm): " << verticesDentro << " en total; profundidad maxima "
+				<< maxPenetracion << " m (ultimo en t = " << tPenetracion << " s)\n"
+				<< "[Prueba combate] distancia minima a la caja del arbitro: " << minArbitro << " m; vertices dentro: " << dentroArbitro << "\n"
+				<< "[Prueba combate] velocidad maxima de desplazamiento: " << maxVel << " m/s; de un vertice: " << maxVelVertice
+				<< " m/s (t = " << tMaxVelVertice << " s); fuera del golpe: " << maxVelFuera << " m/s (t = " << tMaxVelFuera << " s)"
+				<< std::defaultfloat << std::endl;
+			glfwSetWindowShouldClose(window, GL_TRUE);
+			return;
+		}
+		repeticion++;
+		std::cout << "[Prueba combate] repeticion " << repeticion << std::endl;
+		if (repeticion == 2)
+			pulsar(GLFW_KEY_T);       // Árbitro y combate a la vez: el combate debe esperar
+		pulsar(GLFW_KEY_SPACE);
+		enCurso = true;
+		pulsoDurante = false;
+		siguiente = cuadros = 0;
+		inicio = glfwGetTime();
+		inicioReal = -1.0;
+		return;
+	}
+
+	if (combate.Estado() == EstadoCombate::EnEspera)
+	{
+		if (!arbitro.Activa()) std::cout << "[Prueba combate] ERROR: en espera sin que el arbitro este activo" << std::endl;
+		return;
+	}
+	if (inicioReal < 0.0 && combate.Activa())
+	{
+		inicioReal = glfwGetTime();
+		std::cout << "[Prueba combate] el combate empezo " << inicioReal - inicio << " s despues de pedirlo"
+			<< (repeticion == 2 ? " (esperando al arbitro)" : "") << "; arbitro activo: " << arbitro.Activa() << std::endl;
+	}
+
+	if (combate.Activa())
+	{
+		cuadros++;
+		float t = combate.Tiempo();
+		// Durante el combate: T y Space no deben hacer nada
+		if (repeticion == 2 && !pulsoDurante && t > 2.0f)
+		{
+			pulsar(GLFW_KEY_T);
+			pulsar(GLFW_KEY_SPACE);
+			pulsoDurante = true;
+			std::cout << "[Prueba combate] T y Space durante el combate: arbitro activo " << arbitro.Activa()
+				<< ", tiempo del combate " << combate.Tiempo() << " (sigue " << t << ")" << std::endl;
+		}
+
+		// Mallas deformadas en el mundo
+		static std::vector<glm::vec3> va, vb;
+		A->asset->model->SkinPositions(A->skinPalette, va);
+		B->asset->model->SkinPositions(B->skinPalette, vb);
+		glm::mat4 MA = A->GetMatrix(), MB = B->GetMatrix();
+		for (glm::vec3& v : va) v = glm::vec3(MA * glm::vec4(v, 1.0f));
+		for (glm::vec3& v : vb) v = glm::vec3(MB * glm::vec4(v, 1.0f));
+
+		glm::vec3 amn, amx, bmn, bmx;
+		scene.GetWorldBounds(*arbCuerpo, amn, amx);
+		scene.GetWorldBounds(*arbBrazo, bmn, bmx);
+		amn = glm::min(amn, bmn); amx = glm::max(amx, bmx);
+		for (const std::vector<glm::vec3>* malla : { &va, &vb })
+		{
+			float lona = (malla == &va ? posA0.y : posB0.y);
+			for (const glm::vec3& v : *malla)
+			{
+				minPiso = std::min(minPiso, v.y - lona);
+				minCuerdas = std::min(minCuerdas, limiteCuerdas - std::max(fabsf(v.x), fabsf(v.z)));
+				for (auto& p : postes)
+					if (glm::all(glm::greaterThanEqual(v, p.first)) && glm::all(glm::lessThanEqual(v, p.second))) dentroPostes++;
+				glm::vec3 fuera = glm::max(glm::max(amn - v, v - amx), glm::vec3(0.0f));
+				float d = glm::length(fuera);
+				minArbitro = std::min(minArbitro, d);
+				if (d == 0.0f) dentroArbitro++;
+			}
+		}
+
+		// Distancia entre los cuerpos: rejilla de 10 cm con los vértices del luchador
+		const float CELDA = 0.25f;   // Encuentra cualquier pareja a menos de 25 cm
+		std::unordered_map<long long, std::vector<int>> rejilla;
+		auto clave = [&](int x, int y, int z) { return ((long long)(x + 1000) << 40) | ((long long)(y + 1000) << 20) | (long long)(z + 1000); };
+		for (int i = 0; i < (int)va.size(); i++)
+		{
+			glm::ivec3 c = glm::ivec3(glm::floor(va[i] / CELDA));
+			rejilla[clave(c.x, c.y, c.z)].push_back(i);
+		}
+		float minimo = FLT_MAX;
+		for (const glm::vec3& v : vb)
+		{
+			glm::ivec3 c = glm::ivec3(glm::floor(v / CELDA));
+			for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++)
+			{
+				auto it = rejilla.find(clave(c.x + dx, c.y + dy, c.z + dz));
+				if (it == rejilla.end()) continue;
+				for (int i : it->second) minimo = std::min(minimo, glm::length(va[i] - v));
+			}
+		}
+		// Penetración: los luchadores se enfrentan a lo largo de X. Para cada columna (y, z) de 2 cm se
+		// guarda el intervalo [frente, espalda] en X de cada cuerpo; un vértice del otro cuerpo dentro de
+		// ese intervalo está dentro de él (aproximación válida para torso, brazos y piernas).
+		{
+			const float COL = 0.02f;
+			auto columnas = [&](const std::vector<glm::vec3>& vs) {
+				std::unordered_map<long long, glm::vec2> c;
+				for (const glm::vec3& v : vs)
+				{
+					long long k = ((long long)(int)floorf(v.y / COL) + 100000) * 1000000LL + ((long long)(int)floorf(v.z / COL) + 100000);
+					auto it = c.find(k);
+					if (it == c.end()) c[k] = glm::vec2(v.x, v.x);
+					else it->second = glm::vec2(std::min(it->second.x, v.x), std::max(it->second.y, v.x));
+				}
+				return c; };
+			auto contar = [&](const std::vector<glm::vec3>& vs, const std::unordered_map<long long, glm::vec2>& c) {
+				for (size_t i = 0; i < vs.size(); i++)
+				{
+					const glm::vec3& v = vs[i];
+					long long k = ((long long)(int)floorf(v.y / COL) + 100000) * 1000000LL + ((long long)(int)floorf(v.z / COL) + 100000);
+					auto it = c.find(k);
+					if (it == c.end() || v.x <= it->second.x || v.x >= it->second.y) continue;
+					float prof = std::min(v.x - it->second.x, it->second.y - v.x);
+					if (prof > 0.005f) { verticesDentro++; maxPenetracion = std::max(maxPenetracion, prof); tPenetracion = t; }
+				} };
+			contar(va, columnas(vb));
+			contar(vb, columnas(va));
+		}
+
+		bool ventanaContacto = t > T_IMPACTO - 0.03f && t < T_IMPACTO + 0.2f;
+		if (!ventanaContacto && minimo < minEntre) { minEntre = minimo; tMinEntre = t; }
+		if (fabsf(t - T_IMPACTO) < 1e-4f)
+			brechaImpacto = minimo;   // En el impacto la pareja más cercana es el brazo con el rival
+
+		// Velocidad de desplazamiento y de cada vértice con el tiempo de la animación (un salto de pose
+		// aparecería como una velocidad enorme)
+		static std::vector<glm::vec3> pa, pb;
+		static float tAnterior = -1.0f;
+		float dtAnim = t - tAnterior;
+		if (tAnterior >= 0.0f && dtAnim > 1e-4f && pa.size() == va.size() && pb.size() == vb.size())
+		{
+			maxVel = std::max(maxVel, std::max(glm::length(A->position - antA), glm::length(B->position - antB)) / dtAnim);
+			bool golpe = t > T_PREPARA && t < T_IMPACTO + 0.2f;   // Brazo y reacción: rápidos a propósito
+			auto revisar = [&](const std::vector<glm::vec3>& ahora, const std::vector<glm::vec3>& antes) {
+				for (size_t i = 0; i < ahora.size(); i++)
+				{
+					float v = glm::length(ahora[i] - antes[i]) / dtAnim;
+					if (v > maxVelVertice) { maxVelVertice = v; tMaxVelVertice = t; }
+					if (!golpe && v > maxVelFuera) { maxVelFuera = v; tMaxVelFuera = t; }
+				} };
+			revisar(va, pa);
+			revisar(vb, pb);
+		}
+		pa = va; pb = vb; tAnterior = t;
+		antA = A->position; antB = B->position;
+
+		// Capturas en instantes exactos: el siguiente cuadro avanza justo hasta el próximo instante
+		if (repeticion == 1 && siguiente < NUM_CAPTURAS && t >= capturas[siguiente].t - 1e-4f)
+		{
+			std::cout << "[Prueba combate] t = " << t << " s, fases: " << combate.FaseActual()
+				<< "; luchador (" << A->position.x << ", " << A->position.y << ", " << A->position.z << ") penta ("
+				<< B->position.x << ", " << B->position.y << ", " << B->position.z << "), distancia entre cuerpos "
+				<< (minimo == FLT_MAX ? std::string("> 0.25") : std::to_string(minimo)) << " m" << std::endl;
+			char nombre[96];
+			snprintf(nombre, sizeof(nombre), "_%02d_%s.png", siguiente + 2, capturas[siguiente].nombre);
+			SaveScreenshot(prefijo + nombre);
+			siguiente++;
+		}
+		limiteDeltaCombate = (repeticion == 1 && siguiente < NUM_CAPTURAS) ? std::max(capturas[siguiente].t - t, 0.0f)
+			: (fabsf(t - T_IMPACTO) > 1e-4f && t < T_IMPACTO ? T_IMPACTO - t : FLT_MAX);
+		if (limiteDeltaCombate <= 0.0f) limiteDeltaCombate = FLT_MAX;
+		return;
+	}
+
+	// Terminó: el cuadro ya muestra el reposo
+	limiteDeltaCombate = FLT_MAX;
+	float errPos = glm::length(A->position - posA0) + glm::length(B->position - posB0);
+	float errRot = glm::length(A->rotation - rotA0) + glm::length(B->rotation - rotB0);
+	double duracion = glfwGetTime() - inicioReal;
+	std::cout << "[Prueba combate] repeticion " << repeticion << " terminada: " << cuadros << " cuadros en " << duracion << " s ("
+		<< cuadros / duracion << " fps, secuencia de " << combate.Duracion() << " s); error final: posicion " << errPos
+		<< " m, rotacion " << errRot << " grados, paletas vacias: " << (A->skinPalette.empty() && B->skinPalette.empty()) << std::endl;
+	if (repeticion == 1)
+		SaveScreenshot(prefijo + "_11_fin.png");
+	enCurso = false;
+}
+
 void ApplyCameraView(int index)
 {
 	if (cameraViews.empty()) return;
@@ -677,6 +971,10 @@ void Animation()
 
 	// Árbitro (T): la pose se calcula con el tiempo transcurrido de la secuencia
 	arbitro.Actualizar(deltaTime);
+
+	// Combate (Space): empieza cuando el árbitro no está en su secuencia
+	float dtCombate = deltaCombateFijo > 0.0f ? deltaCombateFijo : std::min(deltaTime, limiteDeltaCombate);
+	combate.Actualizar(dtCombate, !arbitro.Activa());
 
 	// Trayectoria parabólica del burrito volador, desde el público hasta el ring
 	if (SceneObject* burrito = objBurrito)
@@ -857,13 +1155,19 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 		// Input 3: animación del árbitro con la tecla 'T' (antes era 'A', que también mueve la
 		// cámara). Si la secuencia está en curso se ignora; al terminar se puede repetir.
-		if (key == GLFW_KEY_T && arbitro.Iniciar())
-			std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
-
-		// Input 4: Activar ataque del luchador con la barra espaciadora
-		if (key == GLFW_KEY_SPACE) {
-			animacionLuchador1 = true;
+		if (key == GLFW_KEY_T)
+		{
+			if (combate.Ocupado())
+				std::cout << "Arbitro: espera a que termine el combate" << std::endl;
+			else if (arbitro.Iniciar())
+				std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
 		}
+
+		// Input 4: combate con la barra espaciadora. Repetir la tecla durante el combate no lo reinicia;
+		// si el árbitro está en su secuencia, el combate empieza cuando él termina.
+		if (key == GLFW_KEY_SPACE && combate.Solicitar())
+			std::cout << (arbitro.Activa() ? "Combate: en espera, inicia cuando el arbitro termine" : "Combate: inicia")
+				<< " (" << combate.Duracion() << " s)" << std::endl;
 
 		// ---- Depuración ----
 		if (key == GLFW_KEY_F1) showDebugGrid = !showDebugGrid;

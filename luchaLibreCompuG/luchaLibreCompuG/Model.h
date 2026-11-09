@@ -3,6 +3,8 @@
 #include <string>
 #include <iostream>
 #include <map>
+#include <set>
+#include <functional>
 #include <vector>
 #include <cmath>
 #include <cfloat>
@@ -47,6 +49,22 @@ struct ModelOptions
 	// Une las mallas que comparten material en una sola (menos llamadas de dibujo). Los colores de
 	// materiales sin textura pasan a color por vértice, así que la apariencia no cambia.
 	bool mergeMeshes = true;
+	// Lee el esqueleto (huesos y pesos) para deformar la malla con poses calculadas por código
+	// (Model::ComputePose). Las animaciones que traiga el archivo NO se usan.
+	bool skinning = false;
+};
+
+// Hueso del esqueleto. Las matrices están en el espacio del modelo (el mismo en que se guardan los
+// vértices: con las transformaciones de nodos ya aplicadas, antes de la normalización de Scene).
+struct SkeletonBone
+{
+	string name;
+	int parent = -1;                          // Hueso padre (ancestro más cercano que también es hueso)
+	glm::mat4 bindGlobal = glm::mat4(1.0f);   // Pose de enlace: la pose en que están guardados los vértices
+	glm::mat4 bindLocal = glm::mat4(1.0f);    // bindGlobal relativo al padre
+	glm::mat4 inverseBind = glm::mat4(1.0f);
+	glm::mat3 bindRotation = glm::mat3(1.0f); // Orientación de bindGlobal sin escala
+	bool hasBind = false;
 };
 
 // Parte original del archivo (nodo/malla) con su caja envolvente; se conserva aunque las
@@ -84,7 +102,8 @@ public:
 	}
 
 	// Draws the model, and thus all its meshes. El shader ya debe tener la matriz "model".
-	void Draw(Shader& shader, RenderPass pass = RenderPass::All) const
+	// skinActive: ya se envió la paleta de huesos de una pose (uniform "bones")
+	void Draw(Shader& shader, RenderPass pass = RenderPass::All, bool skinActive = false) const
 	{
 		const MaterialUniforms& uniforms = MaterialUniforms::For(shader.Program);
 		for (const Mesh& mesh : this->meshes)
@@ -92,14 +111,83 @@ public:
 			bool transparent = mesh.material.IsTransparent();
 			if (pass == RenderPass::Opaque && transparent) continue;
 			if (pass == RenderPass::Transparent && !transparent) continue;
-			mesh.Draw(uniforms);
+			mesh.Draw(uniforms, skinActive);
 		}
+	}
+
+	// ---------------- Esqueleto (solo con ModelOptions::skinning)
+	bool HasSkeleton() const { return !this->bones.empty(); }
+	const vector<SkeletonBone>& GetBones() const { return this->bones; }
+	int FindBone(const string& name) const
+	{
+		auto it = this->boneIndex.find(name);
+		return it == this->boneIndex.end() ? -1 : it->second;
+	}
+
+	// Cinemática directa. rotations[i] es el giro del hueso i alrededor de su articulación, expresado
+	// con los ejes del personaje (Y arriba, frente +Z, su derecha en -X) tal como estaban en la pose de
+	// enlace; el giro de cada padre se hereda. Identidad en todos = pose de enlace (el modelo sin animar).
+	//   G_i = G_padre * bindLocal_i * (B_i^T * Q_i * B_i)      paleta_i = G_i * inverse(bindGlobal_i)
+	// 'global' recibe la transformación de cada hueso (su origen es la articulación) y 'palette' las
+	// matrices para el shader.
+	void ComputePose(const vector<glm::mat3>& rotations, vector<glm::mat4>& global, vector<glm::mat4>& palette) const
+	{
+		size_t n = this->bones.size();
+		global.resize(n);
+		palette.resize(n);
+		for (size_t i = 0; i < n; i++)
+		{
+			const SkeletonBone& b = this->bones[i];
+			glm::mat3 local = (i < rotations.size()) ? glm::transpose(b.bindRotation) * rotations[i] * b.bindRotation : glm::mat3(1.0f);
+			glm::mat4 base = b.parent >= 0 ? global[b.parent] * b.bindLocal : b.bindGlobal;
+			global[i] = base * glm::mat4(local);
+			palette[i] = global[i] * b.inverseBind;
+		}
+	}
+
+	// Posiciones de todos los vértices con una paleta (en la CPU, misma fórmula que lighting.vs).
+	// Sirve para comprobar colisiones con la geometría real; no se usa al dibujar.
+	void SkinPositions(const vector<glm::mat4>& palette, vector<glm::vec3>& out) const
+	{
+		out.resize(this->cpuPositions.size());
+		for (size_t v = 0; v < this->cpuPositions.size(); v++)
+		{
+			const SkinVertex& s = this->cpuSkin[v];
+			float total = s.weights.x + s.weights.y + s.weights.z + s.weights.w;
+			glm::vec4 p(this->cpuPositions[v], 1.0f);
+			if (total > 0.001f && !palette.empty())
+				p = (s.weights.x * palette[s.bones.x] + s.weights.y * palette[s.bones.y]
+					+ s.weights.z * palette[s.bones.z] + s.weights.w * palette[s.bones.w]) * p;
+			out[v] = glm::vec3(p);
+		}
+	}
+	// Un solo vértice deformado (espacio del modelo)
+	glm::vec3 SkinnedPosition(size_t v, const vector<glm::mat4>& palette) const
+	{
+		const SkinVertex& s = this->cpuSkin[v];
+		float total = s.weights.x + s.weights.y + s.weights.z + s.weights.w;
+		glm::vec4 p(this->cpuPositions[v], 1.0f);
+		if (total > 0.001f && !palette.empty())
+			p = (s.weights.x * palette[s.bones.x] + s.weights.y * palette[s.bones.y]
+				+ s.weights.z * palette[s.bones.z] + s.weights.w * palette[s.bones.w]) * p;
+		return glm::vec3(p);
+	}
+	size_t SkinVertexCount() const { return this->cpuPositions.size(); }
+
+	// Hueso con más peso en cada vértice (para agrupar vértices por zona del cuerpo en las pruebas)
+	int DominantBone(size_t v) const
+	{
+		const SkinVertex& s = this->cpuSkin[v];
+		int best = 0;
+		for (int k = 1; k < 4; k++) if (s.weights[k] > s.weights[best]) best = k;
+		return s.weights[best] > 0.0f ? s.bones[best] : -1;
 	}
 
 	bool IsLoaded() const { return !this->meshes.empty(); }
 	bool HasTransparency() const { return this->hasTransparency; }
 	const string& GetPath() const { return this->path; }
 	const vector<Mesh>& GetMeshes() const { return this->meshes; }
+	const vector<MeshPart>& GetParts() const { return this->parts; }
 	size_t GetTriangleCount() const { return this->triangleCount; }
 
 	// Caja envolvente del modelo completo en sus unidades originales
@@ -161,6 +249,12 @@ private:
 	bool hasTransparency = false;
 	map<unsigned int, Material> materialCache; // Un material de Assimp se convierte una sola vez
 
+	// Esqueleto (vacío si el modelo no lo tiene o no se pidió skinning)
+	vector<SkeletonBone> bones;
+	map<string, int> boneIndex;
+	vector<glm::vec3> cpuPositions;   // Copia de los vértices y sus pesos, solo para pruebas en la CPU
+	vector<SkinVertex> cpuSkin;
+
 	// Geometría ya transformada, antes de subirla a la GPU
 	struct MeshData
 	{
@@ -168,6 +262,7 @@ private:
 		vector<Vertex> vertices;
 		vector<GLuint> indices;
 		Material material;
+		vector<SkinVertex> skin;      // Vacío si la malla no tiene huesos
 	};
 	vector<MeshData> pending;
 
@@ -194,10 +289,63 @@ private:
 		size_t slash = normalized.find_last_of('/');
 		this->directory = (slash == string::npos) ? "." : normalized.substr(0, slash);
 
+		if (this->options.skinning)
+			this->collectBones(scene);
+
 		// Process ASSIMP's root node recursively, acumulando las transformaciones de cada nodo
 		this->processNode(scene->mRootNode, scene, glm::mat4(1.0f));
 		this->buildMeshes();
 		this->computeBounds();
+		if (this->options.skinning)
+			this->finishSkeleton();
+	}
+
+	// Huesos = nodos que deforman alguna malla. Se recorren en orden de la jerarquía para que cada
+	// padre quede antes que sus hijos (así ComputePose los calcula en una sola pasada).
+	void collectBones(const aiScene* scene)
+	{
+		std::set<string> names;
+		for (unsigned int m = 0; m < scene->mNumMeshes; m++)
+			for (unsigned int b = 0; b < scene->mMeshes[m]->mNumBones; b++)
+				names.insert(scene->mMeshes[m]->mBones[b]->mName.C_Str());
+		std::function<void(aiNode*, int)> visit = [&](aiNode* node, int parent)
+		{
+			string name = node->mName.C_Str();
+			if (names.count(name) && !this->boneIndex.count(name))
+			{
+				SkeletonBone bone;
+				bone.name = name;
+				bone.parent = parent;
+				parent = (int)this->bones.size();
+				this->boneIndex[name] = parent;
+				this->bones.push_back(bone);
+			}
+			for (unsigned int i = 0; i < node->mNumChildren; i++)
+				visit(node->mChildren[i], parent);
+		};
+		visit(scene->mRootNode, -1);
+	}
+
+	void finishSkeleton()
+	{
+		if (this->bones.size() > (size_t)MAX_SKIN_BONES)
+		{
+			cout << "  AVISO: " << this->bones.size() << " huesos (maximo " << MAX_SKIN_BONES << "); se dibuja sin esqueleto" << endl;
+			this->bones.clear();
+			this->boneIndex.clear();
+			return;
+		}
+		for (SkeletonBone& b : this->bones)
+		{
+			if (!b.hasBind)   // Hueso sin vértices propios: se toma el del padre (no ocurre en estos modelos)
+				b.bindGlobal = b.parent >= 0 ? this->bones[b.parent].bindGlobal : glm::mat4(1.0f);
+			b.bindLocal = b.parent >= 0 ? glm::inverse(this->bones[b.parent].bindGlobal) * b.bindGlobal : b.bindGlobal;
+			b.inverseBind = glm::inverse(b.bindGlobal);
+			glm::mat3 r(b.bindGlobal);
+			for (int c = 0; c < 3; c++) r[c] = glm::normalize(r[c]);
+			b.bindRotation = r;
+		}
+		cout << "  esqueleto: " << this->bones.size() << " huesos, " << this->cpuPositions.size() << " vertices con pesos" << endl;
 	}
 
 	// Registra las partes originales y crea las mallas de dibujo (unidas por material si se pidió)
@@ -217,7 +365,7 @@ private:
 		if (!this->options.mergeMeshes)
 		{
 			for (MeshData& data : this->pending)
-				this->meshes.emplace_back(data.name, data.vertices, data.indices, data.material);
+				this->meshes.emplace_back(data.name, data.vertices, data.indices, data.material, data.skin.empty() ? nullptr : &data.skin);
 			this->pending.clear();
 			return;
 		}
@@ -256,12 +404,21 @@ private:
 			}
 			MeshData& g = groups[it->second];
 			GLuint offset = static_cast<GLuint>(g.vertices.size());
+			// Pesos: si alguna parte del grupo tiene huesos, las demás llevan pesos en cero (no se deforman)
+			if (!data.skin.empty() || !g.skin.empty())
+			{
+				g.skin.resize(offset);
+				if (data.skin.empty())
+					g.skin.resize(offset + data.vertices.size());
+				else
+					g.skin.insert(g.skin.end(), data.skin.begin(), data.skin.end());
+			}
 			g.vertices.insert(g.vertices.end(), data.vertices.begin(), data.vertices.end());
 			for (GLuint idx : data.indices)
 				g.indices.push_back(idx + offset);
 		}
 		for (MeshData& g : groups)
-			this->meshes.emplace_back(g.name, g.vertices, g.indices, g.material);
+			this->meshes.emplace_back(g.name, g.vertices, g.indices, g.material, g.skin.empty() ? nullptr : &g.skin);
 		this->pending.clear();
 	}
 
@@ -394,10 +551,56 @@ private:
 		// Return a mesh object created from the extracted mesh data
 		MeshData data;
 		data.name = nodeName.empty() ? string(mesh->mName.C_Str()) : nodeName;
+		if (this->options.skinning && mesh->mNumBones > 0)
+			data.skin = this->processSkin(mesh, transform);
+		if (this->options.skinning)
+		{
+			for (const Vertex& v : vertices)
+				this->cpuPositions.push_back(v.Position);
+			if (data.skin.empty())
+				this->cpuSkin.resize(this->cpuPositions.size());
+			else
+				this->cpuSkin.insert(this->cpuSkin.end(), data.skin.begin(), data.skin.end());
+		}
 		data.vertices = std::move(vertices);
 		data.indices = std::move(indices);
 		data.material = cached->second;
 		return data;
+	}
+
+	// Pesos de los huesos de una malla: se conservan los 4 más fuertes por vértice y se normalizan.
+	// También fija la pose de enlace de cada hueso: mOffsetMatrix lleva del espacio de la malla al
+	// del hueso, así que en el espacio del modelo bindGlobal = transform_malla * inverse(offset).
+	vector<SkinVertex> processSkin(aiMesh* mesh, const glm::mat4& transform)
+	{
+		vector<SkinVertex> skin(mesh->mNumVertices);
+		for (unsigned int b = 0; b < mesh->mNumBones; b++)
+		{
+			const aiBone* bone = mesh->mBones[b];
+			auto it = this->boneIndex.find(bone->mName.C_Str());
+			if (it == this->boneIndex.end()) continue;
+			SkeletonBone& sb = this->bones[it->second];
+			if (!sb.hasBind)
+			{
+				sb.bindGlobal = transform * glm::inverse(toGlm(bone->mOffsetMatrix));
+				sb.hasBind = true;
+			}
+			for (unsigned int w = 0; w < bone->mNumWeights; w++)
+			{
+				const aiVertexWeight& vw = bone->mWeights[w];
+				if (vw.mVertexId >= skin.size() || vw.mWeight <= 0.0f) continue;
+				SkinVertex& s = skin[vw.mVertexId];
+				int slot = 0;
+				for (int k = 1; k < 4; k++) if (s.weights[k] < s.weights[slot]) slot = k;
+				if (vw.mWeight > s.weights[slot]) { s.weights[slot] = vw.mWeight; s.bones[slot] = it->second; }
+			}
+		}
+		for (SkinVertex& s : skin)
+		{
+			float total = s.weights.x + s.weights.y + s.weights.z + s.weights.w;
+			if (total > 0.0f) s.weights /= total;
+		}
+		return skin;
 	}
 
 	static float toDisplay(float linear)

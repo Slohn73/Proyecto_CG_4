@@ -146,10 +146,12 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.targetHeight = 1.85f;
 	a.options.excludeNodes = { "Entorno" };   // El archivo incluye una esquina de ring de muestra
 	a.options.diffuseOverrides = { { "LuchadorMat", "Luchador_Diffuse.png" } };
+	a.options.skinning = true;   // Esqueleto Mixamo: la animación de combate (Space) mueve sus huesos por código
 	scene.RegisterAsset(a);
 
 	a = AssetDesc(); a.id = "penta"; a.path = I + "penta/source/Taunt.fbx";
 	a.targetHeight = 1.80f;
+	a.options.skinning = true;   // El clip "Taunt" que trae el archivo no se usa
 	scene.RegisterAsset(a);
 
 	// Árbitro (1.89 m): el FBX original (source/) no tiene esqueleto. Para animar la señal de la
