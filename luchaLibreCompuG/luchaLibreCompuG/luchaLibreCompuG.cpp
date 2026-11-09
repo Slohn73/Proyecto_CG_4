@@ -18,6 +18,9 @@
    --captura archivo.png     guarda una imagen del primer cuadro estable y termina
    --captura-todas prefijo   guarda una imagen por cada vista (prefijo_1.png, prefijo_2.png, ...) y termina
    --segundos N              termina después de N segundos (para medir el rendimiento)
+   --prueba-arbitro prefijo  ejecuta dos veces la animación del árbitro (T), guarda capturas de sus
+                             fases (prefijo_1_inicio.png, ...), mide holguras y termina
+   --limitar-fps N           limita los cuadros por segundo (para comprobar la independencia de los FPS)
 */
 
 #include <iostream>
@@ -26,6 +29,8 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <thread>
+#include <chrono>
 
 // Librería GLEW
 #include <GL/glew.h>
@@ -50,6 +55,7 @@
 #include "Lights.h"
 #include "DebugDraw.h"
 #include "ArenaLayout.h"
+#include "AnimacionArbitro.h"
 
 // Prototipos de funciones
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -61,6 +67,7 @@ void ApplyCameraView(int index);
 void SelectObject(int direction);
 void UpdateWindowTitle(GLFWwindow* window);
 void SaveScreenshot(const std::string& file);
+void PruebaArbitro(const std::string& prefijo, GLFWwindow* window);
 
 // Dimensiones de la ventana
 const GLuint WIDTH = 1280, HEIGHT = 720;
@@ -134,8 +141,10 @@ glm::vec3 baseCervezaMesa(0.0f);                     // Punto de la mesa donde s
 
 // Estados de animación por teclado / input
 bool animacionLuchador1 = false;
-bool animacionArbitro = false;
 bool animacionPantalla = false;
+
+// Árbitro (T): se acerca, observa a los luchadores, da la señal de inicio y regresa (AnimacionArbitro.h)
+AnimacionArbitro arbitro;
 
 int main(int argc, char** argv)
 {
@@ -148,6 +157,8 @@ int main(int argc, char** argv)
 	std::string captureFile;
 	std::string captureAllPrefix;
 	double runSeconds = 0.0;
+	std::string pruebaArbitro;
+	double limiteFps = 0.0;
 	for (int i = 1; i < argc; i++)
 	{
 		std::string arg = argv[i];
@@ -157,6 +168,8 @@ int main(int argc, char** argv)
 		else if (arg == "--captura" && i + 1 < argc) captureFile = argv[++i];
 		else if (arg == "--captura-todas" && i + 1 < argc) captureAllPrefix = argv[++i];
 		else if (arg == "--segundos" && i + 1 < argc) runSeconds = atof(argv[++i]);
+		else if (arg == "--prueba-arbitro" && i + 1 < argc) pruebaArbitro = argv[++i];
+		else if (arg == "--limitar-fps" && i + 1 < argc) limiteFps = atof(argv[++i]);
 		else if (arg == "--camara" && i + 5 < argc)
 		{
 			customCamera = true;
@@ -317,6 +330,9 @@ int main(int argc, char** argv)
 	for (SceneObject& obj : scene.Objects())
 		if (obj.assetId == "bocina")
 			objBocinas.push_back(&obj);
+	if (!arbitro.Inicializar(scene.Find("arbitro"), scene.Find("arbitro_brazo_derecho"),
+		scene.Find("luchador"), scene.Find("penta"), glm::vec3(0.0f)))
+		std::cout << "AVISO: no se encontro el arbitro; la tecla T no tendra efecto" << std::endl;
 
 	cameraViews = GetCameraViews();
 	if (galleryMode)
@@ -436,7 +452,16 @@ int main(int argc, char** argv)
 				ApplyCameraView(captureView);
 		}
 
+		if (!pruebaArbitro.empty() && framesRendered >= 3)
+			PruebaArbitro(pruebaArbitro, window);
+
 		glfwSwapBuffers(window);
+		if (limiteFps > 0.0)
+		{
+			double finCuadro = currentFrame + 1.0 / limiteFps;
+			while (glfwGetTime() < finCuadro)
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		}
 		if (runSeconds > 0.0 && glfwGetTime() - loopStart > runSeconds)
 			glfwSetWindowShouldClose(window, GL_TRUE);
 	}
@@ -458,6 +483,108 @@ void SaveScreenshot(const std::string& file)
 		std::cout << "Captura guardada en " << file << std::endl;
 	else
 		std::cout << "No se pudo guardar la captura " << file << std::endl;
+}
+
+// --prueba-arbitro: reproduce dos veces la secuencia del árbitro sin interacción. En la primera
+// guarda capturas de sus fases; en ambas mide (con cajas envolventes en el mundo) la holgura con
+// los luchadores, la distancia a las cuerdas y la altura sobre la lona, y al terminar comprueba que
+// recupera exactamente su transformación original. Se llama después de dibujar cada cuadro.
+void PruebaArbitro(const std::string& prefijo, GLFWwindow* window)
+{
+	struct Captura { float t; const char* nombre; };
+	static const Captura capturas[] = { { 0.8f, "acercamiento" }, { 2.8f, "observa_luchador" },
+		{ 4.5f, "observa_rival" }, { 6.4f, "senal" }, { 8.4f, "retroceso" } };
+	static SceneObject* cuerpo = scene.Find("arbitro");
+	static SceneObject* brazo = scene.Find("arbitro_brazo_derecho");
+	static const SceneObject* luchadores[2] = { scene.Find("luchador"), scene.Find("penta") };
+	if (!cuerpo || !brazo) { glfwSetWindowShouldClose(window, GL_TRUE); return; }
+	static const glm::vec3 pos0 = cuerpo->position, rot0 = cuerpo->rotation;
+	static const glm::vec3 posBrazo0 = brazo->position, rotBrazo0 = brazo->rotation;
+	static int repeticion = 0, siguiente = 0, cuadros = 0;
+	static bool enCurso = false;
+	static double inicio = 0.0;
+	static float holgura[2] = { FLT_MAX, FLT_MAX }, tHolgura[2] = { 0.0f, 0.0f };
+	static float maxCentro = 0.0f, minAltura = FLT_MAX, maxElevacion = 0.0f, maxVel = 0.0f, maxVelYaw = 0.0f;
+	static glm::vec3 posAnterior = pos0;
+	static float yawAnterior = rot0.y;
+
+	if (!enCurso)
+	{
+		if (repeticion == 0)
+			SaveScreenshot(prefijo + "_1_inicio.png");
+		if (repeticion == 2)
+		{
+			std::cout << std::fixed << std::setprecision(3)
+				<< "[Prueba arbitro] holgura minima (cajas) con el luchador " << holgura[0] << " m (t = " << tHolgura[0]
+				<< " s), con el rival " << holgura[1] << " m (t = " << tHolgura[1] << " s)\n"
+				<< "[Prueba arbitro] extension maxima desde el centro (|x| o |z|) " << maxCentro
+				<< " m; la lona llega a " << Arena::RING_MITAD << " m\n"
+				<< "[Prueba arbitro] punto mas bajo respecto a la lona " << minAltura << " m; elevacion maxima al caminar "
+				<< maxElevacion << " m\n"
+				<< "[Prueba arbitro] velocidad maxima " << maxVel << " m/s, giro maximo " << maxVelYaw << " grados/s"
+				<< std::defaultfloat << std::endl;
+			glfwSetWindowShouldClose(window, GL_TRUE);
+			return;
+		}
+		arbitro.Iniciar();
+		enCurso = true;
+		siguiente = cuadros = 0;
+		inicio = glfwGetTime();
+		std::cout << "[Prueba arbitro] repeticion " << ++repeticion << std::endl;
+		return;
+	}
+
+	// Mediciones de la pose que se acaba de dibujar
+	cuadros++;
+	const float lona = pos0.y;
+	glm::vec3 mn, mx, amn, amx;
+	scene.GetWorldBounds(*cuerpo, mn, mx);
+	scene.GetWorldBounds(*brazo, amn, amx);
+	mn = glm::min(mn, amn);
+	mx = glm::max(mx, amx);
+	for (int i = 0; i < 2; i++)
+	{
+		glm::vec3 lmn, lmx;
+		if (!luchadores[i] || !scene.GetWorldBounds(*luchadores[i], lmn, lmx)) continue;
+		// Separación entre cajas: positiva si hay espacio libre en algún eje
+		glm::vec3 sep = glm::max(lmn - mx, mn - lmx);
+		float h = std::max(sep.x, std::max(sep.y, sep.z));
+		if (h < holgura[i]) { holgura[i] = h; tHolgura[i] = arbitro.Tiempo(); }
+	}
+	maxCentro = std::max(maxCentro, std::max(std::max(fabsf(mn.x), fabsf(mx.x)), std::max(fabsf(mn.z), fabsf(mx.z))));
+	minAltura = std::min(minAltura, mn.y - lona);
+	maxElevacion = std::max(maxElevacion, cuerpo->position.y - lona);
+	if (deltaTime > 0.0f)
+	{
+		maxVel = std::max(maxVel, glm::length(cuerpo->position - posAnterior) / deltaTime);
+		maxVelYaw = std::max(maxVelYaw, fabsf(cuerpo->rotation.y - yawAnterior) / deltaTime);
+	}
+	posAnterior = cuerpo->position;
+	yawAnterior = cuerpo->rotation.y;
+
+	if (arbitro.Activa())
+	{
+		if (repeticion == 1 && siguiente < 5 && arbitro.Tiempo() >= capturas[siguiente].t)
+		{
+			std::cout << "[Prueba arbitro] t = " << arbitro.Tiempo() << " s, fase: " << arbitro.FaseActual()
+				<< ", pos (" << cuerpo->position.x << ", " << cuerpo->position.y << ", " << cuerpo->position.z
+				<< "), rot (" << cuerpo->rotation.x << ", " << cuerpo->rotation.y << ", " << brazo->rotation.z << ")" << std::endl;
+			SaveScreenshot(prefijo + "_" + std::to_string(siguiente + 2) + "_" + capturas[siguiente].nombre + ".png");
+			siguiente++;
+		}
+		return;
+	}
+
+	// Terminó: este cuadro ya muestra la pose final
+	float errPos = glm::length(cuerpo->position - pos0) + glm::length(brazo->position - posBrazo0);
+	float errRot = glm::length(cuerpo->rotation - rot0) + glm::length(brazo->rotation - rotBrazo0);
+	double duracion = glfwGetTime() - inicio;
+	std::cout << "[Prueba arbitro] repeticion " << repeticion << " terminada: " << cuadros << " cuadros en " << duracion
+		<< " s (" << cuadros / duracion << " fps, secuencia de " << arbitro.Duracion() << " s); error final: posicion "
+		<< errPos << " m, rotacion " << errRot << " grados" << std::endl;
+	if (repeticion == 1)
+		SaveScreenshot(prefijo + "_7_regreso.png");
+	enCurso = false;
 }
 
 void ApplyCameraView(int index)
@@ -547,6 +674,9 @@ void Animation()
 		float golpe = powf(1.0f - salto, 6.0f);
 		objCervezaMesa->scale = glm::vec3(1.0f + 0.06f * golpe, 1.0f - 0.12f * golpe, 1.0f + 0.06f * golpe);
 	}
+
+	// Árbitro (T): la pose se calcula con el tiempo transcurrido de la secuencia
+	arbitro.Actualizar(deltaTime);
 
 	// Trayectoria parabólica del burrito volador, desde el público hasta el ring
 	if (SceneObject* burrito = objBurrito)
@@ -725,11 +855,10 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 				light.diffuse = colorLuzSpot;
 		}
 
-		// Input 3: Activar animación del árbitro con la tecla 'T'
-		// (antes era 'A', que también mueve la cámara a la izquierda)
-		if (key == GLFW_KEY_T) {
-			animacionArbitro = !animacionArbitro;
-		}
+		// Input 3: animación del árbitro con la tecla 'T' (antes era 'A', que también mueve la
+		// cámara). Si la secuencia está en curso se ignora; al terminar se puede repetir.
+		if (key == GLFW_KEY_T && arbitro.Iniciar())
+			std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
 
 		// Input 4: Activar ataque del luchador con la barra espaciadora
 		if (key == GLFW_KEY_SPACE) {

@@ -20,8 +20,10 @@
     <None Include="Shaders\skybox.frag" />
     <None Include="Shaders\skybox.vs" />
     <None Include="herramientas\convertir_blend.py" />
+    <None Include="herramientas\separar_arbitro.py" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AnimacionArbitro.h" />
     <ClInclude Include="ArenaLayout.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="DebugDraw.h" />
