@@ -152,9 +152,15 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.targetHeight = 1.80f;
 	scene.RegisterAsset(a);
 
-	a = AssetDesc(); a.id = "arbitro"; a.path = I + "arbitro-ruper-design/source/manga ralgla_cuello en v.fbx";
-	a.unitScale = 0.01f;   // 1.89 m
-	a.options.diffuseOverrides = { { "material0", "../textures/arbitro.png" } };
+	// Árbitro (1.89 m): el FBX original (source/) no tiene esqueleto. Para animar la señal de la
+	// tecla T se separó el brazo derecho con su manga (herramientas/separar_arbitro.py) sin cambiar
+	// la geometría. Ambas piezas comparten el origen (centro de la base del modelo completo), por
+	// eso usan Pivot::Original y se colocan en el mismo punto. El FBX original no se modificó.
+	a = AssetDesc(); a.id = "arbitro"; a.path = I + "arbitro-ruper-design/separado/arbitro_cuerpo.fbx";
+	a.unitScale = 0.01f; a.pivot = Pivot::Original;
+	a.options.diffuseOverrides = { { "*", "../textures/arbitro.png" } };
+	scene.RegisterAsset(a);
+	a.id = "arbitro_brazo_derecho"; a.path = I + "arbitro-ruper-design/separado/arbitro_brazo_derecho.fbx";
 	scene.RegisterAsset(a);
 
 	a = AssetDesc(); a.id = "mascara"; a.path = I + "lucha-libre-mask/source/LuchaLibreOptimized/LuchaLibreOptimized.obj";
@@ -316,7 +322,7 @@ inline const std::vector<ArenaSide>& GetArenaSides()
 inline std::vector<std::string> GetGalleryOrder()
 {
 	return { "ring", "gradas", "rampa", "barrera", "marcador", "bocina", "silla", "luchador", "penta", "arbitro",
-		"espectador_A", "espectador_B", "espectador_C", "espectador_D", "espectador_E", "espectador_F",
+		"arbitro_brazo_derecho", "espectador_A", "espectador_B", "espectador_C", "espectador_D", "espectador_E", "espectador_F",
 		"mascara", "cinturon", "camara_tv", "camara_broadcast", "luminaria_techo", "reflector", "reflector_haz",
 		"mesas", "bandera", "pan", "burrito" };
 }
@@ -384,6 +390,8 @@ inline void BuildArena(Scene& scene)
 	scene.Add("luchador", "luchador", "personajes").At(-1.4f, lona, 0.0f).RotY(90.0f);
 	scene.Add("penta", "penta", "personajes").At(1.4f, lona, 0.0f).RotY(-90.0f);
 	scene.Add("arbitro", "arbitro", "personajes").At(0.3f, lona, -1.9f).RotY(0.0f);
+	// Brazo derecho del árbitro: AnimacionArbitro lo coloca cada cuadro sobre el hombro del cuerpo
+	scene.Add("arbitro_brazo_derecho", "arbitro_brazo_derecho", "personajes").At(0.3f, lona, -1.9f).RotY(0.0f);
 
 	// Marcador colgante y barras de luminarias alrededor
 	scene.Add("marcador", "marcador", "techo").At(0.0f, MARCADOR_ALTURA, 0.0f);

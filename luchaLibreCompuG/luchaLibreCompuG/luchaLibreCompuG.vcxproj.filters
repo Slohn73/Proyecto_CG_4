@@ -48,8 +48,14 @@
     <None Include="herramientas\convertir_blend.py">
       <Filter>Herramientas</Filter>
     </None>
+    <None Include="herramientas\separar_arbitro.py">
+      <Filter>Herramientas</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AnimacionArbitro.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ArenaLayout.h">
       <Filter>Header Files</Filter>
     </ClInclude>

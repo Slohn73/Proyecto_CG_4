@@ -29,7 +29,7 @@ más rápido que Debug al cargar.
 | Z | El espectador E lanza su cerveza con el antebrazo izquierdo; se repone al terminar |
 | X | El espectador E levanta el brazo derecho para beber y lo baja |
 | L | Cambiar el color de las luces |
-| T | Animación del árbitro (antes era A, que choca con mover la cámara) |
+| T | El árbitro se acerca al centro, observa a los luchadores, da la señal de inicio con el brazo derecho y regresa a su lugar (se ve en la vista 2; se puede repetir al terminar) |
 | Espacio | Ataque del luchador |
 | F1 | Cuadrícula de 1 m y ejes (X rojo, Y verde, Z azul) |
 | F2 | Cajas envolventes de todos los objetos |
@@ -68,6 +68,8 @@ luchaLibreCompuG.exe --depuracion              # cuadrícula, ejes y cajas
 luchaLibreCompuG.exe --captura foto.png        # guarda una imagen y termina
 luchaLibreCompuG.exe --captura-todas prefijo   # una imagen por vista
 luchaLibreCompuG.exe --segundos 10             # termina tras N s e informa los FPS
+luchaLibreCompuG.exe --vista 2 --prueba-arbitro arbitro   # corre 2 veces la animación T, guarda capturas y mide holguras
+luchaLibreCompuG.exe --limitar-fps 20          # limita los FPS (para comprobar que las animaciones no dependen de ellos)
 ```
 
 ## Modelos convertidos
@@ -77,3 +79,7 @@ formato que el Assimp incluido no reconoce) se exportaron a OBJ con
 `luchaLibreCompuG/luchaLibreCompuG/herramientas/convertir_blend.py`
 (`blender -b --factory-startup --python herramientas/convertir_blend.py`). Los archivos
 originales no se modificaron.
+
+El árbitro no tiene esqueleto; para la señal de la tecla T se separó su brazo derecho (con la
+manga) en `arbitro-ruper-design/separado/` con `herramientas/separar_arbitro.py`, sin cambiar la
+geometría. La animación y sus parámetros están en `AnimacionArbitro.h`.
