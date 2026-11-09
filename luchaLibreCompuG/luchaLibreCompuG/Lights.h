@@ -3,7 +3,8 @@
 // Luces OpenGL que realmente iluminan la escena (Shaders/lighting.frag).
 // Son independientes de los MODELOS de reflectores/luminarias: un reflector dibujado no
 // ilumina nada por sí mismo. Para que "encienda", se coloca una SpotLight con la misma
-// posición y dirección (ver ArenaLayout.h -> BuildLightRig).
+// posición y dirección (ver ArenaLayout.h -> BuildLightRig). Los reflectores de la rampa
+// actualizan la posición y dirección de su SpotLight cada cuadro (UpdateLightFixtures).
 
 #include <string>
 #include <vector>
@@ -14,7 +15,7 @@
 #include "Shader.h"
 
 const int NUMBER_OF_POINT_LIGHTS = 4; // Debe coincidir con el #define del shader
-const int MAX_SPOT_LIGHTS = 4;
+const int MAX_SPOT_LIGHTS = 8;   // 4 luminarias del ring + 2 reflectores de la rampa (+2 libres)
 
 struct DirLightParams
 {

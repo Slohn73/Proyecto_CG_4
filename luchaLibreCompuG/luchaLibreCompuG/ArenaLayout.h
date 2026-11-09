@@ -109,6 +109,8 @@ inline void RegisterArenaAssets(Scene& scene)
 	// extremo que toca el ring, por eso se respeta el origen. El piso de referencia no se carga.
 	a = AssetDesc(); a.id = "rampa"; a.path = P + "rampa_arco/rampa_lucha_libre_texturizada.obj";
 	a.pivot = Pivot::Original; a.options.excludeNodes = { "Suelo_Referencia" };
+	// Focos del arco: se ven encendidos (solo emisivo, no iluminan)
+	a.options.emissiveOverrides = { { "MAT_LED_Calido", glm::vec3(0.7f, 0.5f, 0.2f) }, { "MAT_Lente_Foco", glm::vec3(0.6f, 0.58f, 0.52f) } };
 	scene.RegisterAsset(a);
 
 	// Barrera: 1.15 m de alto (altura habitual de una valla de contención) -> escala 0.625.
@@ -204,12 +206,16 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.unitScale = 0.01f; a.pivot = Pivot::Original; a.baseRotation = glm::vec3(0.0f, -90.0f, 0.0f);
 	scene.RegisterAsset(a);
 
-	// Reflector colgante con haz de luz: el haz se dibuja translúcido
+	// Reflector con haz de luz. La lente apunta a +Z del archivo y el haz es un cono irregular de
+	// 1.85 m. El haz NO se ilumina: se dibuja como "glow" (Material::glow) con el degradado alfa de
+	// TEX_Lightbeam.png (opaco en la lente, transparente en el extremo) y el color de su luz real.
+	// Antes se dibujaba como superficie gris iluminada con opacidad fija: de ahí los polígonos grises.
 	a = AssetDesc(); a.id = "reflector_haz"; a.path = I + "spotlight/source/Spotlight/Spotlight_Scene.fbx";
 	a.unitScale = 0.01f;
-	a.options.diffuseOverrides = { { "MAT_SceneProps", "TEX_SceneProps_AL.png" } };
-	a.options.opacityOverrides = { { "MAT_Lightbeam", 0.25f } };
-	a.options.emissiveOverrides = { { "MAT_Lightbeam", glm::vec3(0.9f, 0.85f, 0.7f) } };
+	a.options.diffuseOverrides = { { "MAT_SceneProps", "TEX_SceneProps_AL.png" }, { "MAT_Lightbeam", "TEX_Lightbeam.png" } };
+	a.options.opacityOverrides = { { "MAT_Lightbeam", 0.55f } };
+	a.options.emissiveOverrides = { { "MAT_Lightbeam", glm::vec3(1.0f) } };
+	a.options.glowMaterials = { "MAT_Lightbeam" };
 	scene.RegisterAsset(a);
 
 	// Juego de tres mesas plegables (7.2 m en fila) para la mesa de comentaristas
@@ -260,6 +266,14 @@ inline float PartTopY(Scene& scene, const SceneObject& obj, const std::string& p
 	glm::vec3 wmn, wmx;
 	TransformBounds(obj.GetMatrix(), mn, mx, wmn, wmx);
 	return wmx.y;
+}
+
+// Giro (yaw) e inclinación hacia abajo (pitch, X positivo) para que el frente (+Z) apunte a 'to'
+inline glm::vec2 AimAngles(const glm::vec3& from, const glm::vec3& to)
+{
+	glm::vec3 d = to - from;
+	float horizontal = sqrtf(d.x * d.x + d.z * d.z);
+	return glm::vec2(glm::degrees(atan2f(-d.y, horizontal)), FaceYaw(from, to));
 }
 
 // Pseudoaleatorio determinista: la distribución del público es la misma en cada ejecución
@@ -396,10 +410,16 @@ inline void BuildArena(Scene& scene)
 	scene.Add("bandera_entrada", "bandera", "decoracion").At(0.0f, 6.2f, zArco - 1.0f);
 	scene.Add("bocina_entrada_izq", "bocina", "entrada").At(-3.3f, 0.0f, zArco - 0.6f).RotY(0.0f);
 	scene.Add("bocina_entrada_der", "bocina", "entrada").At(3.3f, 0.0f, zArco - 0.6f).RotY(0.0f);
-	// Reflectores con haz sobre la rampa (efectos de entrada; se ajustarán con la iluminación)
-	// (el pivote es la base del haz: queda a 3.4 m, por encima de un luchador sobre la pasarela)
-	scene.Add("reflector_rampa_1", "reflector_haz", "entrada").At(0.0f, 3.4f, -7.5f).RotY(0.0f);
-	scene.Add("reflector_rampa_2", "reflector_haz", "entrada").At(0.0f, 3.4f, -11.5f).RotY(0.0f);
+	// Reflectores con haz sobre la rampa (efectos de entrada). Se cruzan: el más cercano al ring
+	// ilumina la salida del arco y el más cercano al arco ilumina el tramo hacia el ring.
+	// El pivote es la base del haz (3.4 m, por encima de un luchador sobre la pasarela). El eje del
+	// haz ya baja ~16° en el archivo, por eso solo se inclina la diferencia.
+	const float HAZ_INCLINACION = 16.0f;
+	const float pasarela = 1.25f;   // Altura de la pasarela (igual a la del ring)
+	glm::vec2 giroHaz1 = AimAngles(glm::vec3(0.0f, 4.8f, -6.8f), glm::vec3(0.0f, pasarela, zArco + 2.5f));
+	glm::vec2 giroHaz2 = AimAngles(glm::vec3(0.0f, 4.8f, -12.2f), glm::vec3(0.0f, pasarela, -8.5f));
+	scene.Add("reflector_rampa_1", "reflector_haz", "entrada").At(0.0f, 3.4f, -7.5f).Rot(giroHaz1.x - HAZ_INCLINACION, giroHaz1.y, 0.0f);
+	scene.Add("reflector_rampa_2", "reflector_haz", "entrada").At(0.0f, 3.4f, -11.5f).Rot(giroHaz2.x - HAZ_INCLINACION, giroHaz2.y, 0.0f);
 
 	// ---------------- Barreras de protección (cuadro alrededor del ring)
 	for (const ArenaSide& side : GetArenaSides())
@@ -508,7 +528,35 @@ inline void BuildArena(Scene& scene)
 // -------------------------------------------------------------------------------------
 //  3. Luces OpenGL (independientes de los modelos de luminarias)
 // -------------------------------------------------------------------------------------
-inline void BuildLightRig(LightRig& rig)
+
+// Luz real ligada a un modelo de reflector (los dos de la rampa). Cada cuadro
+// (UpdateLightFixtures) su SpotLight toma la posición de la lente y la dirección del eje del
+// modelo, y el haz del modelo se tiñe con el color de esa luz. Si se anima el modelo, la luz lo sigue.
+struct LightFixture
+{
+	size_t spotIndex = 0;                   // Índice en LightRig::spotLights
+	SceneObject* obj = nullptr;
+	glm::vec3 lensFile = glm::vec3(0.0f);   // Centro de la lente (coordenadas del archivo del modelo)
+	glm::vec3 aimFile = glm::vec3(0.0f);    // Otro punto del eje del haz (coordenadas del archivo)
+	float beamGain = 1.0f;                  // glowColor del haz = color difuso de la luz * beamGain
+};
+
+// Medidas del modelo reflector_haz (coordenadas del archivo, en centímetros; lente hacia +Z)
+const glm::vec3 REFLECTOR_HAZ_LENTE(0.0f, 58.6f, 17.1f), REFLECTOR_HAZ_EJE(0.0f, 6.6f, 199.6f);
+
+inline void UpdateLightFixtures(LightRig& rig, std::vector<LightFixture>& fixtures)
+{
+	for (LightFixture& f : fixtures)
+	{
+		if (!f.obj || f.spotIndex >= rig.spotLights.size()) continue;
+		SpotLightParams& spot = rig.spotLights[f.spotIndex];
+		spot.position = ModelPointToWorld(*f.obj, f.lensFile);
+		spot.direction = ModelPointToWorld(*f.obj, f.aimFile) - spot.position;
+		f.obj->glowColor = spot.enabled ? spot.diffuse * f.beamGain : glm::vec3(0.0f);
+	}
+}
+
+inline void BuildLightRig(LightRig& rig, Scene& scene, std::vector<LightFixture>& fixtures)
 {
 	// Luz direccional tenue: iluminación general de la arena
 	rig.dirLight.direction = glm::vec3(-0.2f, -1.0f, -0.3f);
@@ -545,6 +593,37 @@ inline void BuildLightRig(LightRig& rig)
 		s.specular = glm::vec3(0.3f);
 		rig.spotLights.push_back(s);
 	}
+
+	// Reflectores de la rampa: luz de color sobre la pasarela, ligada a los modelos reflector_rampa_*.
+	// Su posición y dirección iniciales se reemplazan por las de la lente en UpdateLightFixtures.
+	const glm::vec3 colorEntrada(1.0f, 0.22f, 0.62f);   // Rosa mexicano
+	const float intensidadRampa = 3.0f;
+	fixtures.clear();
+	const char* rampa[2] = { "reflector_rampa_1", "reflector_rampa_2" };
+	for (int i = 0; i < 2; i++)
+	{
+		SpotLightParams s;
+		s.id = std::string("rampa_") + std::to_string(i + 1);
+		s.cutOffDeg = 10.0f;
+		s.outerCutOffDeg = 17.0f;
+		s.diffuse = colorEntrada * intensidadRampa;
+		s.specular = s.diffuse * 0.3f;
+		s.linear = 0.045f;
+		s.quadratic = 0.0075f;
+		rig.spotLights.push_back(s);
+
+		LightFixture f;
+		f.spotIndex = rig.spotLights.size() - 1;
+		f.obj = scene.Find(rampa[i]);
+		f.lensFile = REFLECTOR_HAZ_LENTE;
+		f.aimFile = REFLECTOR_HAZ_EJE;
+		f.beamGain = 1.0f / intensidadRampa;
+		if (f.obj)
+			fixtures.push_back(f);
+		else
+			rig.spotLights.back().enabled = false;   // Galería: no existe el modelo
+	}
+	UpdateLightFixtures(rig, fixtures);
 }
 
 // -------------------------------------------------------------------------------------

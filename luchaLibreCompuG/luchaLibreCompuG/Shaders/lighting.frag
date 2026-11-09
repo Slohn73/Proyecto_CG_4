@@ -1,7 +1,7 @@
 #version 330 core
 
 #define NUMBER_OF_POINT_LIGHTS 4
-#define MAX_SPOT_LIGHTS 4
+#define MAX_SPOT_LIGHTS 8
 
 // Debe coincidir con struct Material / MaterialUniforms de Mesh.h
 struct Material
@@ -16,6 +16,7 @@ struct Material
     float shininess;
     float opacity;
     bool alphaTest;
+    bool glow;              // Haz de luz: no recibe iluminación, solo brilla (ver la función main)
 };
 
 struct DirLight
@@ -69,6 +70,7 @@ uniform PointLight pointLights[NUMBER_OF_POINT_LIGHTS];
 uniform SpotLight spotLights[MAX_SPOT_LIGHTS];
 uniform int numSpotLights;
 uniform Material material;
+uniform vec3 objectGlow;    // Color del haz de este objeto (lo sincroniza la luz real del reflector)
 
 // Color base y especular del fragmento (textura o color del material)
 vec3 albedo;
@@ -82,6 +84,20 @@ vec3 CalcSpotLight( SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir );
 void main( )
 {
     vec4 texel = material.hasDiffuseMap ? texture( material.diffuse, TexCoords ) : vec4( 1.0 );
+
+    // Haz de luz translúcido: color emisivo teñido con el de su reflector. La opacidad sale del
+    // degradado alfa de la textura (intenso en la lente y nulo en el extremo) y se atenúa cuando
+    // la superficie se ve de canto, para que el cono no muestre contornos duros.
+    if ( material.glow )
+    {
+        vec3 viewDirGlow = normalize( viewPos - FragPos );
+        float facing = abs( dot( normalize( Normal ), viewDirGlow ) );
+        float strength = clamp( max( objectGlow.r, max( objectGlow.g, objectGlow.b ) ), 0.0, 1.0 );
+        float glowAlpha = material.opacity * texel.a * smoothstep( 0.05, 0.7, facing ) * strength;
+        color = vec4( material.emissive * objectGlow, glowAlpha );
+        return;
+    }
+
     if ( material.alphaTest && texel.a < 0.1 )
         discard;
 
