@@ -39,16 +39,6 @@ más rápido que Debug al cargar.
 | F4 | Volver a mostrar todos los objetos |
 | F12 | Guardar captura `captura_N.png` |
 
-## Animaciones del espectador E
-
-Está sentado detrás de la cámara con tripié, junto al espectador azul. Para verlo,
-seleccionar la vista **2** y girar hacia el público.
-
-- **Z:** el antebrazo izquierdo lanza la cerveza hacia el ring en una parábola.
-- **X:** el brazo derecho levanta la otra cerveza para beber y vuelve al reposo.
-
-Las acciones pueden ejecutarse a la vez. La botella lanzada se repone al terminar.
-
 ## Dónde se modifica la escena
 
 Todo está en **`luchaLibreCompuG/luchaLibreCompuG/ArenaLayout.h`**:
