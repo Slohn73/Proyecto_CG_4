@@ -5,3 +5,5 @@ luchaLibreCompuG/Debug
 *.vcxproj.user
 Release
 captura_*.png
+revision_*.log
+revision_*.png
