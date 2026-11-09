@@ -41,6 +41,7 @@ struct Material
 	GLuint diffuseMap = 0;
 	GLuint specularMap = 0;
 	bool alphaTest = false;   // Descarta fragmentos con alfa < 0.1 (recortes como hojas o rejillas)
+	bool glow = false;        // Haz de luz: sin iluminación, color emisivo * objectGlow, alfa de la textura
 
 	bool IsTransparent() const { return opacity < 0.999f; }
 };
@@ -50,7 +51,7 @@ struct Material
 struct MaterialUniforms
 {
 	GLint diffuseMap, specularMap, hasDiffuseMap, hasSpecularMap;
-	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest;
+	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow;
 
 	static const MaterialUniforms& For(GLuint program)
 	{
@@ -70,6 +71,7 @@ struct MaterialUniforms
 		u.shininess = glGetUniformLocation(program, "material.shininess");
 		u.opacity = glGetUniformLocation(program, "material.opacity");
 		u.alphaTest = glGetUniformLocation(program, "material.alphaTest");
+		u.glow = glGetUniformLocation(program, "material.glow");
 		return cache[program] = u;
 	}
 };
@@ -130,6 +132,7 @@ public:
 		glUniform1f(u.shininess, m.shininess);
 		glUniform1f(u.opacity, m.opacity);
 		glUniform1i(u.alphaTest, m.alphaTest);
+		glUniform1i(u.glow, m.glow);
 
 		// Draw mesh
 		glBindVertexArray(this->VAO);

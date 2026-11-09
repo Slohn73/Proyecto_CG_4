@@ -82,6 +82,7 @@ GLfloat lastFrame = 0.0f;
 // Escena e iluminación
 Scene scene;
 LightRig lightRig;
+std::vector<LightFixture> lightFixtures;   // Luces de la rampa ligadas a sus modelos de reflector
 bool luzEscenarioActiva = true;
 glm::vec3 colorLuzSpot(1.0f, 1.0f, 1.0f);
 
@@ -293,7 +294,7 @@ int main(int argc, char** argv)
 		BuildGallery(scene, GetGalleryOrder());
 	else
 		BuildArena(scene);
-	BuildLightRig(lightRig);
+	BuildLightRig(lightRig, scene, lightFixtures);
 	scene.PrintReport(galleryMode);
 
 	objCinturon = scene.Find("cinturon");
@@ -340,6 +341,7 @@ int main(int argc, char** argv)
 		glfwPollEvents();
 		DoMovement();
 		Animation();
+		UpdateLightFixtures(lightRig, lightFixtures);   // Las luces de la rampa siguen a sus reflectores
 
 		titleTimer += deltaTime;
 		if (titleTimer > 0.25)

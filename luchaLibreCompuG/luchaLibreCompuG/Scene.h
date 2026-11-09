@@ -99,6 +99,7 @@ struct SceneObject
 	glm::vec3 scale = glm::vec3(1.0f);           // Escala adicional a la normalización del recurso
 	glm::vec3 pivotOffset = glm::vec3(0.0f);     // Punto local (m) que se coloca en position
 	bool visible = true;
+	glm::vec3 glowColor = glm::vec3(1.0f);       // Color de sus haces de luz (materiales glow); negro = apagado
 	ModelAsset* asset = nullptr;
 
 	glm::mat4 GetMatrix() const
@@ -312,6 +313,7 @@ private:
 	{
 		GLint modelLoc = glGetUniformLocation(shader.Program, "model");
 		GLint normalLoc = glGetUniformLocation(shader.Program, "normalMatrix");
+		GLint glowLoc = glGetUniformLocation(shader.Program, "objectGlow");
 		for (const SceneObject& obj : this->objects)
 		{
 			if (!obj.visible || !obj.asset || !obj.asset->IsReady()) continue;
@@ -320,6 +322,7 @@ private:
 			glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(model)));
 			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 			glUniformMatrix3fv(normalLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
+			glUniform3fv(glowLoc, 1, glm::value_ptr(obj.glowColor));
 			obj.asset->model->Draw(shader, pass);
 		}
 	}

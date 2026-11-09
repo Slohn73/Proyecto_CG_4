@@ -36,6 +36,8 @@ struct ModelOptions
 	map<string, float> opacityOverrides;
 	// Color emisivo por material (superficies que deben verse encendidas, como un haz de luz)
 	map<string, glm::vec3> emissiveOverrides;
+	// Materiales que se dibujan como haz de luz (sin iluminación, ver Material::glow)
+	vector<string> glowMaterials;
 	// Activa el descarte por alfa en todos los materiales del modelo
 	bool alphaTest = false;
 	// Blender y la mayoría de exportadores guardan los colores de material en espacio lineal,
@@ -226,7 +228,7 @@ private:
 			ostringstream k;
 			k << m.diffuseMap << '|' << m.specularMap << '|' << m.specularColor.r << ',' << m.specularColor.g << ',' << m.specularColor.b
 				<< '|' << m.emissiveColor.r << ',' << m.emissiveColor.g << ',' << m.emissiveColor.b << '|' << m.shininess
-				<< '|' << m.opacity << '|' << m.alphaTest;
+				<< '|' << m.opacity << '|' << m.alphaTest << '|' << m.glow;
 			return k.str();
 		};
 
@@ -472,6 +474,8 @@ private:
 			mat.emissiveColor = em->second;
 
 		mat.alphaTest = this->options.alphaTest;
+		for (const string& glowName : this->options.glowMaterials)
+			if (glowName == mat.name) mat.glow = true;
 		return mat;
 	}
 
