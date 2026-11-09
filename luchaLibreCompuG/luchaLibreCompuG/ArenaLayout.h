@@ -46,7 +46,8 @@ namespace Arena
 }
 
 // Trayectoria del burrito volador (tecla B): desde el público hasta la lona del ring.
-// Se recalculan en BuildArena con la altura real de las gradas y de la lona.
+// Se recalculan en BuildArena con la altura real de las gradas y de la lona (BURRITO_FIN.y es la
+// superficie de la lona; la cerveza que lanza el espectador E también cae ahí cerca).
 inline glm::vec3 BURRITO_INICIO(4.0f, 2.5f, 11.0f);
 inline glm::vec3 BURRITO_FIN(0.0f, 1.3f, 0.0f);
 const float BURRITO_ALTURA = 3.0f;
@@ -518,7 +519,8 @@ inline void BuildArena(Scene& scene)
 
 	// ---------------- Burrito volador: sale de un espectador de las gradas norte hacia la lona
 	BURRITO_INICIO = glm::vec3(2.0f, 2.4f, GRADAS_FRENTE + 2.5f);
-	BURRITO_FIN = glm::vec3(0.0f, lona + 0.05f, 0.0f);
+	// Punto de la lona donde cae: fuera de la línea por donde caminan los luchadores (z = 0) y del árbitro
+	BURRITO_FIN = glm::vec3(0.3f, lona, 1.0f);
 	scene.Add("burrito", "burrito", "accesorios").At(BURRITO_INICIO).Hidden();
 
 	// ---------------- Espectador por partes

@@ -25,9 +25,9 @@ más rápido que Debug al cargar.
 | R | Regresar a la vista inicial |
 | 1 – 6 | Vistas: general, ring, entrada, desde el público, cenital, mesa de comentaristas |
 | C | Liberar / capturar el cursor |
-| B | Lanzar el burrito desde el público al ring |
-| Z | El espectador E lanza su cerveza con el antebrazo izquierdo; se repone al terminar |
-| X | El espectador E levanta el brazo derecho para beber y lo baja |
+| B | Un espectador de las gradas norte lanza un burrito al ring (tiro parabólico con g = 9.81 m/s²); cae acostado, queda en la lona y se encoge. No se reinicia a mitad del vuelo |
+| Z | El espectador E (primera fila norte) arma el brazo izquierdo sobre la cabeza y lanza su cerveza al ring; la botella cae acostada en la lona, se encoge y le aparece otra en la mano |
+| X | El espectador E sube la botella derecha a la boca (hombro y codo), da un trago y la baja |
 | L | Cambiar el color de las luces |
 | T | El árbitro se acerca al centro, observa a los luchadores, da la señal de inicio con el brazo derecho y regresa a su lugar (se ve en la vista 2; se puede repetir al terminar) |
 | Espacio | Combate: el luchador camina hacia Penta y le da un golpe al pecho; Penta reacciona y ambos regresan. No se reinicia si se repite la tecla; si el árbitro está en su secuencia, el combate espera a que termine (y T se ignora durante el combate) |
@@ -73,6 +73,7 @@ luchaLibreCompuG.exe --limitar-fps 20          # limita los FPS (para comprobar 
 luchaLibreCompuG.exe --camara 0.3 2.25 2.8 -90 -3 --prueba-combate combate   # corre 2 veces el combate, capturas y mediciones
 luchaLibreCompuG.exe --camara 0.3 2.25 2.8 -90 -3 --video-combate carpeta    # cuadros del combate a 30 por segundo
 luchaLibreCompuG.exe --congelar-combate 3.05    # muestra el combate detenido en ese instante
+luchaLibreCompuG.exe --camara 1.6 1.7 5.6 125 -15 --video-teclas Z@0,X@3 6 carpeta   # pulsa teclas en esos instantes y guarda los cuadros (paso fijo de 1/30 s)
 ```
 
 ## Modelos convertidos
