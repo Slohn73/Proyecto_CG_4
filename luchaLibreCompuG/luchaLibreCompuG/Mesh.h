@@ -28,6 +28,18 @@ struct Vertex
 	glm::vec3 Color = glm::vec3(1.0f);
 };
 
+// Influencia de los huesos sobre un vértice (solo en modelos con esqueleto y ModelOptions::skinning).
+// Hasta 4 huesos por vértice; los pesos suman 1. Pesos en cero = vértice que no sigue al esqueleto.
+struct SkinVertex
+{
+	glm::ivec4 bones = glm::ivec4(0);
+	glm::vec4 weights = glm::vec4(0.0f);
+};
+
+// Huesos que puede recibir el shader en un solo dibujo (uniform "bones[]" de lighting.vs).
+// 56 matrices caben en el mínimo de uniforms de vértice que garantiza OpenGL 3.3 (1024 componentes).
+const int MAX_SKIN_BONES = 56;
+
 // Propiedades del material que usa Shaders/lighting.frag (struct Material).
 // Si un mapa no existe su id es 0 y el shader usa el color correspondiente.
 struct Material
@@ -52,6 +64,7 @@ struct MaterialUniforms
 {
 	GLint diffuseMap, specularMap, hasDiffuseMap, hasSpecularMap;
 	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow;
+	GLint skinned;   // lighting.vs: aplica la paleta de huesos a esta malla
 
 	static const MaterialUniforms& For(GLuint program)
 	{
@@ -72,6 +85,7 @@ struct MaterialUniforms
 		u.opacity = glGetUniformLocation(program, "material.opacity");
 		u.alphaTest = glGetUniformLocation(program, "material.alphaTest");
 		u.glow = glGetUniformLocation(program, "material.glow");
+		u.skinned = glGetUniformLocation(program, "skinned");
 		return cache[program] = u;
 	}
 };
@@ -85,10 +99,12 @@ public:
 	glm::vec3 boundsMin;     // Caja envolvente en el espacio del modelo (ya con las transformaciones de nodos)
 	glm::vec3 boundsMax;
 	GLsizei indexCount = 0;
+	bool skinned = false;    // Tiene pesos de huesos (segundo búfer, atributos 4 y 5)
 
 	/*  Functions  */
-	// Constructor
-	Mesh(const string& name, const vector<Vertex>& vertices, const vector<GLuint>& indices, const Material& material)
+	// Constructor. 'skin' (opcional) trae un SkinVertex por vértice para deformarla con el esqueleto.
+	Mesh(const string& name, const vector<Vertex>& vertices, const vector<GLuint>& indices, const Material& material,
+		const vector<SkinVertex>* skin = nullptr)
 		: name(name), material(material)
 	{
 		this->boundsMin = glm::vec3(FLT_MAX);
@@ -103,6 +119,8 @@ public:
 		// Now that we have all the required data, set the vertex buffers and its attribute pointers.
 		// Los datos quedan en la GPU; no se conserva copia en CPU.
 		this->setupMesh(vertices, indices);
+		if (skin && skin->size() == vertices.size() && this->VAO)
+			this->setupSkin(*skin);
 	}
 
 	// Render the mesh
@@ -111,9 +129,11 @@ public:
 		this->Draw(MaterialUniforms::For(shader.Program));
 	}
 
-	void Draw(const MaterialUniforms& u) const
+	// skinActive: el objeto que se dibuja trae una pose (paleta de huesos ya enviada al shader)
+	void Draw(const MaterialUniforms& u, bool skinActive = false) const
 	{
 		const Material& m = this->material;
+		glUniform1i(u.skinned, skinActive && this->skinned);
 
 		// Unidad 0: difusa, unidad 1: especular. Si no hay mapa se enlaza una textura blanca.
 		glActiveTexture(GL_TEXTURE0);
@@ -143,7 +163,23 @@ public:
 
 private:
 	/*  Render data  */
-	GLuint VAO = 0, VBO = 0, EBO = 0;
+	GLuint VAO = 0, VBO = 0, EBO = 0, skinVBO = 0;
+
+	// Índices (atributo entero 4) y pesos (atributo 5) de los huesos, en un búfer aparte para que
+	// las mallas sin esqueleto no ocupen memoria extra
+	void setupSkin(const vector<SkinVertex>& skin)
+	{
+		glBindVertexArray(this->VAO);
+		glGenBuffers(1, &this->skinVBO);
+		glBindBuffer(GL_ARRAY_BUFFER, this->skinVBO);
+		glBufferData(GL_ARRAY_BUFFER, skin.size() * sizeof(SkinVertex), &skin[0], GL_STATIC_DRAW);
+		glEnableVertexAttribArray(4);
+		glVertexAttribIPointer(4, 4, GL_INT, sizeof(SkinVertex), (GLvoid*)offsetof(SkinVertex, bones));
+		glEnableVertexAttribArray(5);
+		glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(SkinVertex), (GLvoid*)offsetof(SkinVertex, weights));
+		glBindVertexArray(0);
+		this->skinned = true;
+	}
 
 	/*  Functions    */
 	// Initializes all the buffer objects/arrays

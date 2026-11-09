@@ -12,7 +12,7 @@
 
  Opciones de línea de comandos (útiles para revisar la escena sin interacción):
    --galeria                 una instancia de cada modelo en fila, en lugar de la arena
-   --vista N                 vista inicial (1-6)
+   --vista N                 vista inicial (1-8)
    --camara x y z yaw pitch  posición y orientación inicial de la cámara
    --depuracion              muestra cuadrícula, ejes y cajas envolventes
    --captura archivo.png     guarda una imagen del primer cuadro estable y termina
@@ -21,6 +21,12 @@
    --prueba-arbitro prefijo  ejecuta dos veces la animación del árbitro (T), guarda capturas de sus
                              fases (prefijo_1_inicio.png, ...), mide holguras y termina
    --limitar-fps N           limita los cuadros por segundo (para comprobar la independencia de los FPS)
+   --prueba-combate prefijo  ejecuta dos veces el combate (Space), guarda capturas de sus fases y mide
+                             holguras con la malla deformada real; la segunda vez pide T y Space juntos
+   --video-combate carpeta   graba el combate cuadro por cuadro a 30 cuadros por segundo de animación
+   --congelar-combate t      muestra el combate detenido en el instante t (para revisar poses)
+   --video-teclas sec dur carpeta  pulsa teclas en instantes exactos ("B@0,Z@0.5,X@4") con paso fijo
+                             de 1/30 s y guarda cada cuadro durante dur segundos (revisión visual)
 */
 
 #include <iostream>
@@ -31,6 +37,7 @@
 #include <iomanip>
 #include <thread>
 #include <chrono>
+#include <unordered_map>
 
 // Librería GLEW
 #include <GL/glew.h>
@@ -42,6 +49,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/euler_angles.hpp>   // extractEulerAngleYXZ: rotación compuesta -> ángulos del motor
 
 // Librería de carga de imágenes
 #include "SOIL2/SOIL2.h"
@@ -56,6 +65,7 @@
 #include "DebugDraw.h"
 #include "ArenaLayout.h"
 #include "AnimacionArbitro.h"
+#include "AnimacionCombate.h"
 
 // Prototipos de funciones
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -68,6 +78,7 @@ void SelectObject(int direction);
 void UpdateWindowTitle(GLFWwindow* window);
 void SaveScreenshot(const std::string& file);
 void PruebaArbitro(const std::string& prefijo, GLFWwindow* window);
+void PruebaCombate(const std::string& prefijo, GLFWwindow* window);
 
 // Dimensiones de la ventana
 const GLuint WIDTH = 1280, HEIGHT = 720;
@@ -109,29 +120,70 @@ std::vector<SceneObject*> objBocinas;
 float rotacionCinturon = 0.0f;
 float escalaBocina = 1.0f;
 
-// Variables para la animación del Burrito Volador (Idea del equipo)
+// Objetos lanzados (burrito y cerveza): tiro parabólico con la gravedad real. Al caer se quedan
+// acostados sobre la lona y después se encogen hasta desaparecer (no se esfuman de golpe).
+const float GRAVEDAD = 9.81f;
+const float REPOSO_EN_LONA = 1.2f;                   // Segundos que el objeto queda sobre la lona
+const float ENCOGER = 0.4f;                          // Segundos en que se encoge hasta desaparecer
+
+// Burrito volador (B): sale de las manos de un espectador de las gradas norte. Con la parábola
+// mix(inicio, fin, u) + 4h·u(1-u) la aceleración vertical es -8h/T², así que T = sqrt(8h/g).
 bool burritoLanzado = false;
 float tiempoVueloBurrito = 0.0f;
+float apoyoBurrito = 0.05f;                          // Altura del centro del burrito acostado (de su caja)
 
 // Animación del espectador E (Z: lanza la cerveza izquierda, X: bebe la derecha).
-// Cada pieza gira alrededor de su articulación con position + rotation + pivotOffset:
-//   T(cuerpo + codo) * R(giro) * T(-codo)  ->  la pieza rota sobre el codo / hombro.
-// Puntos medidos en los OBJ del espectador (metros, coordenadas del modelo).
-SceneObject *objE_cuerpo = nullptr, *objE_antebrazoIzq = nullptr, *objE_manoIzq = nullptr;
+// Cada brazo es una cadena hombro -> codo: el brazo gira sobre el hombro y el antebrazo, la mano y
+// la botella giran además sobre el codo (que se mueve con el brazo):
+//   pieza del antebrazo = T(cuerpo) · R(yaw) · T(hombro) · Rh · T(codo - hombro) · Rc · T(-codo)
+// La rotación total se convierte a los ángulos de Euler del motor (orden Y, X, Z).
+// Puntos medidos en los OBJ del espectador (metros, coordenadas del modelo; frente +Z, izquierda +X).
+SceneObject *objE_cuerpo = nullptr, *objE_brazoIzq = nullptr, *objE_antebrazoIzq = nullptr, *objE_manoIzq = nullptr;
 SceneObject *objE_brazoDer = nullptr, *objE_antebrazoDer = nullptr, *objE_manoDer = nullptr;
 SceneObject *objCervezaIzq = nullptr, *objCervezaDer = nullptr;
-const glm::vec3 CODO_IZQ(0.27f, 0.70f, 0.0f);
-const glm::vec3 HOMBRO_DER(-0.26f, 0.95f, -0.03f);
+const glm::vec3 HOMBRO_IZQ(0.26f, 0.95f, -0.03f), HOMBRO_DER(-0.26f, 0.95f, -0.03f);
+const glm::vec3 CODO_IZQ(0.27f, 0.70f, 0.0f), CODO_DER(-0.27f, 0.70f, 0.0f);
+const glm::vec3 MANO_DER(-0.14f, 0.665f, 0.12f);    // Centro de la mano derecha
 const glm::vec3 AGARRE_IZQ(0.14f, 0.57f, 0.12f);    // Base de la botella: la mano la toma a ~10 cm
 const glm::vec3 AGARRE_DER(-0.14f, 0.57f, 0.12f);
-const glm::vec3 CENTRO_BOTELLA(0.0f, 0.12f, 0.0f);  // La botella mide 24.5 cm
-const float SUELTA_CERVEZA = 0.70f;                  // Segundo en que la mano suelta la botella
-const float ALTURA_CERVEZA = 2.5f;                   // Altura extra del arco parabólico
+const glm::vec3 CENTRO_BOTELLA(0.0f, 0.124f, 0.0f); // La botella mide 24.5 cm
+const float RADIO_BOTELLA = 0.033f;
+
+// Pose de un brazo: (flexión al frente, abducción, giro sobre el eje del brazo, codo), en grados.
+// Cada clave lleva la curva del tramo que termina en ella: 's' suave, 'a' acelera, 'f' frena.
+struct ClaveBrazoE { float t; glm::vec4 pose; char curva; };
+
+// Z: lanzamiento por encima de la cabeza. Hombro y codo giran solo en el plano sagital (eje X):
+// el vecino de la izquierda está a 0.6 m y su brazo toca el de E, así que el brazo no se abre de lado.
+// Con la botella rígida en la mano el codo no puede flexionarse más de ~40° sin que la botella toque
+// el pecho; por eso el brazo se arma arriba (180°) y el latigazo es del codo, que se extiende.
+const ClaveBrazoE CLAVES_LANZAR[] = {
+	{ 0.00f, glm::vec4(0.0f), 's' },
+	{ 0.28f, glm::vec4(90.0f, 0.0f, 0.0f, 0.0f), 's' },     // Sube el brazo al frente
+	{ 0.55f, glm::vec4(180.0f, 0.0f, 0.0f, 30.0f), 's' },   // Arma: brazo arriba, botella atrás
+	{ 0.65f, glm::vec4(180.0f, 0.0f, 0.0f, 30.0f), 's' },   // Apunta
+	{ 0.73f, glm::vec4(175.0f, 0.0f, 0.0f, -20.0f), 'a' },  // Latigazo hasta soltar
+	{ 0.88f, glm::vec4(90.0f, 0.0f, 0.0f, -40.0f), 'f' },   // Seguimiento: el brazo baja al frente
+	{ 1.60f, glm::vec4(0.0f), 's' },                         // Regreso al reposo
+};
+const float SUELTA_CERVEZA = 0.73f;                  // Segundo en que la mano suelta la botella
+const glm::vec2 CAIDA_CERVEZA(0.0f, 1.4f);           // (dx, z) del punto de la lona donde cae
+const float ELEVACION_MIN = 45.0f, ELEVACION_MAX = 70.0f; // Debe librar las cuerdas del ring
+
+// X: beber. Hombro con 3 giros y codo con su bisagra anatómica; las poses se resolvieron para que la
+// boca de la botella quede en los labios (y = 1.115, z = 0.068) sin tocar la cabeza.
+const glm::vec4 POSE_ACERCAR(121.0f, 36.6f, 10.5f, -28.1f);  // Botella en la boca, inclinada 16°
+const glm::vec4 POSE_TRAGO(125.0f, 26.8f, -4.6f, -28.1f);    // Levanta el codo: inclinada 24°
+const ClaveBrazoE CLAVES_BEBER[] = {
+	{ 0.0f, glm::vec4(0.0f), 's' },
+	{ 0.9f, POSE_ACERCAR, 's' },
+	{ 1.4f, POSE_TRAGO, 's' },
+	{ 1.9f, POSE_ACERCAR, 's' },
+	{ 2.8f, glm::vec4(0.0f), 's' },
+};
+
 bool lanzandoCerveza = false;
-bool cervezaEnVuelo = false;
 float tiempoLanzamiento = 0.0f;
-glm::vec3 inicioCerveza(0.0f);
-glm::vec3 giroSuelta(0.0f);
 bool bebiendo = false;
 float tiempoBebida = 0.0f;
 
@@ -140,11 +192,17 @@ SceneObject* objCervezaMesa = nullptr;
 glm::vec3 baseCervezaMesa(0.0f);                     // Punto de la mesa donde se apoya
 
 // Estados de animación por teclado / input
-bool animacionLuchador1 = false;
 bool animacionPantalla = false;
 
 // Árbitro (T): se acerca, observa a los luchadores, da la señal de inicio y regresa (AnimacionArbitro.h)
 AnimacionArbitro arbitro;
+
+// Combate (Space): el luchador se acerca a Penta y le da un golpe al pecho; Penta reacciona
+// (AnimacionCombate.h). Mientras el árbitro está en su secuencia el combate espera, y T se ignora
+// durante el combate, para que nunca se crucen en el ring.
+AnimacionCombate combate;
+float limiteDeltaCombate = FLT_MAX;   // Solo pruebas: hace coincidir un cuadro con un instante exacto
+float deltaCombateFijo = 0.0f;        // Solo video: paso fijo de animación por cuadro
 
 int main(int argc, char** argv)
 {
@@ -157,7 +215,10 @@ int main(int argc, char** argv)
 	std::string captureFile;
 	std::string captureAllPrefix;
 	double runSeconds = 0.0;
-	std::string pruebaArbitro;
+	std::string pruebaArbitro, pruebaCombate, videoCombate;
+	std::string videoTeclas, carpetaVideoTeclas;
+	float duracionVideoTeclas = 0.0f;
+	float congelarCombate = -1.0f;
 	double limiteFps = 0.0;
 	for (int i = 1; i < argc; i++)
 	{
@@ -170,6 +231,15 @@ int main(int argc, char** argv)
 		else if (arg == "--segundos" && i + 1 < argc) runSeconds = atof(argv[++i]);
 		else if (arg == "--prueba-arbitro" && i + 1 < argc) pruebaArbitro = argv[++i];
 		else if (arg == "--limitar-fps" && i + 1 < argc) limiteFps = atof(argv[++i]);
+		else if (arg == "--prueba-combate" && i + 1 < argc) pruebaCombate = argv[++i];
+		else if (arg == "--video-combate" && i + 1 < argc) videoCombate = argv[++i];
+		else if (arg == "--congelar-combate" && i + 1 < argc) congelarCombate = (float)atof(argv[++i]);
+		else if (arg == "--video-teclas" && i + 3 < argc)
+		{
+			videoTeclas = argv[++i];
+			duracionVideoTeclas = (float)atof(argv[++i]);
+			carpetaVideoTeclas = argv[++i];
+		}
 		else if (arg == "--camara" && i + 5 < argc)
 		{
 			customCamera = true;
@@ -313,6 +383,7 @@ int main(int argc, char** argv)
 	objCinturon = scene.Find("cinturon");
 	objBurrito = scene.Find("burrito");
 	objE_cuerpo = scene.Find("E_anim_cuerpo");
+	objE_brazoIzq = scene.Find("E_anim_brazo_izquierdo");
 	objE_antebrazoIzq = scene.Find("E_anim_antebrazo_izquierdo");
 	objE_manoIzq = scene.Find("E_anim_mano_izquierda");
 	objE_brazoDer = scene.Find("E_anim_brazo_derecho");
@@ -320,6 +391,32 @@ int main(int argc, char** argv)
 	objE_manoDer = scene.Find("E_anim_mano_derecha");
 	objCervezaIzq = scene.Find("E_cerveza_izquierda");
 	objCervezaDer = scene.Find("E_cerveza_derecha");
+
+	// Burrito: sale frente al pecho del espectador de las gradas más cercano al punto de lanzamiento,
+	// y cae acostado (giro final de 90° en X): su centro queda a media altura de la caja girada.
+	if (objBurrito)
+	{
+		SceneObject* lanzador = nullptr;
+		float masCerca = FLT_MAX;
+		for (SceneObject& o : scene.Objects())
+			if (o.id.rfind("publico_", 0) == 0 && glm::length(o.position - BURRITO_INICIO) < masCerca)
+			{
+				masCerca = glm::length(o.position - BURRITO_INICIO);
+				lanzador = &o;
+			}
+		if (lanzador)
+			BURRITO_INICIO = lanzador->position + glm::vec3(EulerRotation(lanzador->rotation) * glm::vec4(0.0f, 1.0f, 0.3f, 0.0f));
+		if (objBurrito->asset && objBurrito->asset->IsReady())
+		{
+			glm::vec3 mn, mx;
+			TransformBounds(EulerRotation(glm::vec3(90.0f, 0.0f, 0.0f)), objBurrito->asset->localMin, objBurrito->asset->localMax, mn, mx);
+			apoyoBurrito = -mn.y;
+		}
+		objBurrito->position = BURRITO_INICIO;
+		std::cout << "Burrito (B): lo lanza " << (lanzador ? lanzador->id : std::string("(sin espectador)")) << " desde ("
+			<< BURRITO_INICIO.x << ", " << BURRITO_INICIO.y << ", " << BURRITO_INICIO.z << "), vuela "
+			<< sqrtf(8.0f * BURRITO_ALTURA / GRAVEDAD) << " s" << std::endl;
+	}
 
 	// Cerveza junto al pan de muerto (misma altura de la mesa), girada 90° para ver al ring (+X)
 	if (SceneObject* pan = scene.Find("pan_de_muerto"))
@@ -333,6 +430,14 @@ int main(int argc, char** argv)
 	if (!arbitro.Inicializar(scene.Find("arbitro"), scene.Find("arbitro_brazo_derecho"),
 		scene.Find("luchador"), scene.Find("penta"), glm::vec3(0.0f)))
 		std::cout << "AVISO: no se encontro el arbitro; la tecla T no tendra efecto" << std::endl;
+	if (combate.Inicializar(scene.Find("luchador"), scene.Find("penta")))
+		std::cout << "Combate listo: golpe a " << combate.AvanceGolpe() << " m de avance; el brazo toca al rival al "
+			<< 100.0f * combate.FraccionImpacto() << " % del barrido (separacion " << combate.SeparacionImpacto() << " m), mano a "
+			<< combate.VelocidadImpacto() << " m/s, intensidad de la reaccion " << combate.Intensidad() << std::endl;
+	else
+		std::cout << "AVISO: los luchadores no tienen esqueleto; la barra espaciadora no tendra efecto" << std::endl;
+	if (congelarCombate >= 0.0f)
+		combate.Congelar(congelarCombate);
 
 	cameraViews = GetCameraViews();
 	if (galleryMode)
@@ -352,6 +457,33 @@ int main(int argc, char** argv)
 		GLfloat currentFrame = (GLfloat)glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
 		lastFrame = currentFrame;
+
+		// --video-teclas: paso fijo de 1/30 s y pulsaciones reales (KeyCallback) en instantes exactos.
+		// Formato de la secuencia: "B@0,Z@0.5,X@4" (tecla @ segundo de animación).
+		if (!carpetaVideoTeclas.empty() && framesRendered >= 3)
+		{
+			static int cuadroTeclas = 0;
+			deltaTime = 1.0f / 30.0f;
+			mouseCaptured = false;          // El mouse real no debe mover la cámara durante la grabación
+			float ahora = cuadroTeclas * deltaTime, siguiente = ahora + deltaTime;
+			std::stringstream lista(videoTeclas);
+			std::string evento;
+			while (std::getline(lista, evento, ','))
+			{
+				size_t arroba = evento.find('@');
+				if (arroba == std::string::npos || arroba == 0) continue;
+				float instante = (float)atof(evento.c_str() + arroba + 1);
+				if (instante >= ahora - 1e-4f && instante < siguiente - 1e-4f)
+				{
+					std::string nombreTecla = evento.substr(0, arroba);
+					int tecla = nombreTecla == "SPACE" ? GLFW_KEY_SPACE : toupper((unsigned char)nombreTecla[0]);
+					KeyCallback(window, tecla, 0, GLFW_PRESS, 0);
+					KeyCallback(window, tecla, 0, GLFW_RELEASE, 0);
+					std::cout << "Video: tecla " << nombreTecla << " en t = " << ahora << " s" << std::endl;
+				}
+			}
+			cuadroTeclas++;
+		}
 
 		// ------------------------------------------------------------ Actualización
 		glfwPollEvents();
@@ -454,6 +586,29 @@ int main(int argc, char** argv)
 
 		if (!pruebaArbitro.empty() && framesRendered >= 3)
 			PruebaArbitro(pruebaArbitro, window);
+		if (!pruebaCombate.empty() && framesRendered >= 3)
+			PruebaCombate(pruebaCombate, window);
+		if (!videoCombate.empty() && framesRendered >= 3)
+		{
+			// Paso fijo de 1/30 s: el video dura lo mismo que la animación aunque guardar cada cuadro sea lento
+			static int cuadroVideo = 0, cola = 0;
+			if (cuadroVideo == 0) { combate.Solicitar(); deltaCombateFijo = 1.0f / 30.0f; }
+			char nombre[64];
+			snprintf(nombre, sizeof(nombre), "/cuadro_%04d.png", cuadroVideo++);
+			SaveScreenshot(videoCombate + nombre);
+			if (!combate.Ocupado() && ++cola > 15)
+				glfwSetWindowShouldClose(window, GL_TRUE);
+		}
+		if (!carpetaVideoTeclas.empty() && framesRendered >= 4)
+		{
+			// Cuadro n = estado después de n pasos de 1/30 s (el primer paso lleva la pulsación de t = 0)
+			static int cuadroGuardado = 0;
+			char nombre[64];
+			snprintf(nombre, sizeof(nombre), "/cuadro_%04d.png", cuadroGuardado++);
+			SaveScreenshot(carpetaVideoTeclas + nombre);
+			if (cuadroGuardado / 30.0f > duracionVideoTeclas)
+				glfwSetWindowShouldClose(window, GL_TRUE);
+		}
 
 		glfwSwapBuffers(window);
 		if (limiteFps > 0.0)
@@ -587,6 +742,262 @@ void PruebaArbitro(const std::string& prefijo, GLFWwindow* window)
 	enCurso = false;
 }
 
+// --prueba-combate: reproduce dos veces el combate sin interacción, usando KeyCallback como si se
+// presionaran las teclas. En la primera guarda capturas de sus fases; en la segunda pide T y Space
+// a la vez (el combate debe esperar al árbitro) y vuelve a presionar T y Space durante el combate
+// (deben ignorarse). En cada cuadro deforma en la CPU todos los vértices de ambos luchadores (la
+// misma fórmula que lighting.vs) y mide: altura sobre la lona, distancia a las cuerdas y postes
+// reales del ring, distancia entre los dos cuerpos, distancia al árbitro y la separación de la
+// brazo del atacante con el rival en el instante del impacto.
+void PruebaCombate(const std::string& prefijo, GLFWwindow* window)
+{
+	using namespace CombateParams;
+	struct Captura { float t; const char* nombre; };
+	static const Captura capturas[] = { { T_GUARDIA, "guardia" }, { T_PROVOCA, "provoca" }, { 1.9f, "camina" },
+		{ T_PREPARA, "prepara" }, { T_IMPACTO, "impacto" }, { T_IMPACTO + 0.15f, "reaccion" },
+		{ T_IMPACTO + 0.8f, "dolor_y_celebracion" }, { T_IMPACTO + 1.5f, "sacude_cabeza" }, { 6.0f, "regreso" } };
+	const int NUM_CAPTURAS = (int)(sizeof(capturas) / sizeof(capturas[0]));
+	static SceneObject* A = scene.Find("luchador");
+	static SceneObject* B = scene.Find("penta");
+	static SceneObject* ring = scene.Find("ring");
+	static SceneObject* arbCuerpo = scene.Find("arbitro");
+	static SceneObject* arbBrazo = scene.Find("arbitro_brazo_derecho");
+	if (!A || !B || !ring || !A->asset->model->HasSkeleton() || !B->asset->model->HasSkeleton())
+	{
+		std::cout << "[Prueba combate] faltan los luchadores con esqueleto" << std::endl;
+		glfwSetWindowShouldClose(window, GL_TRUE);
+		return;
+	}
+	static const glm::vec3 posA0 = A->position, rotA0 = A->rotation, posB0 = B->position, rotB0 = B->rotation;
+	static int repeticion = 0, siguiente = 0, cuadros = 0;
+	static bool enCurso = false, pulsoDurante = false;
+	static double inicio = 0.0, inicioReal = 0.0;
+	static float minPiso = FLT_MAX, minCuerdas = FLT_MAX, minEntre = FLT_MAX, tMinEntre = 0.0f, brechaImpacto = FLT_MAX;
+	static float minArbitro = FLT_MAX, maxVel = 0.0f, maxVelVertice = 0.0f, tMaxVelVertice = 0.0f, maxVelFuera = 0.0f, tMaxVelFuera = 0.0f;
+	static int dentroPostes = 0, dentroArbitro = 0, verticesDentro = 0;
+	static float maxPenetracion = 0.0f, tPenetracion = 0.0f;
+	static glm::vec3 antA = posA0, antB = posB0;
+
+	// Cuerdas y postes del ring en el mundo (partes del modelo Ring.obj)
+	static std::vector<std::pair<glm::vec3, glm::vec3>> cuerdas, postes;
+	static float limiteCuerdas = FLT_MAX;
+	if (cuerdas.empty())
+	{
+		for (const MeshPart& part : ring->asset->model->GetParts())
+		{
+			glm::vec3 mn, mx;
+			TransformBounds(ring->GetMatrix(), part.boundsMin, part.boundsMax, mn, mx);
+			if (part.name.rfind("Cylinder", 0) == 0)
+			{
+				cuerdas.push_back({ mn, mx });
+				glm::vec3 d = mx - mn;
+				float interior = d.x > d.z ? std::min(fabsf(mn.z), fabsf(mx.z)) : std::min(fabsf(mn.x), fabsf(mx.x));
+				limiteCuerdas = std::min(limiteCuerdas, interior);
+			}
+			else if (part.name.rfind("Poste", 0) == 0)
+				postes.push_back({ mn, mx });
+		}
+		std::cout << "[Prueba combate] " << cuerdas.size() << " cuerdas (cara interior a " << limiteCuerdas << " m del centro), "
+			<< postes.size() << " postes" << std::endl;
+	}
+
+	auto pulsar = [&](int tecla) { KeyCallback(window, tecla, 0, GLFW_PRESS, 0); KeyCallback(window, tecla, 0, GLFW_RELEASE, 0); };
+
+	if (!enCurso)
+	{
+		if (repeticion == 0)
+			SaveScreenshot(prefijo + "_01_inicio.png");
+		if (repeticion == 2)
+		{
+			std::cout << std::fixed << std::setprecision(3)
+				<< "[Prueba combate] punto mas bajo de ambas mallas respecto a la lona: " << minPiso << " m\n"
+				<< "[Prueba combate] holgura minima con la cara interior de las cuerdas: " << minCuerdas << " m; vertices dentro de los postes: " << dentroPostes << "\n"
+				<< "[Prueba combate] distancia minima entre los cuerpos fuera del contacto: "
+				<< (minEntre == FLT_MAX ? std::string("mas de 0.25") : std::to_string(minEntre)) << " m (t = " << tMinEntre << " s)\n"
+				<< "[Prueba combate] separacion brazo-rival en el impacto: " << brechaImpacto << " m\n"
+				<< "[Prueba combate] vertices de un luchador dentro del otro (> 5 mm): " << verticesDentro << " en total; profundidad maxima "
+				<< maxPenetracion << " m (ultimo en t = " << tPenetracion << " s)\n"
+				<< "[Prueba combate] distancia minima a la caja del arbitro: " << minArbitro << " m; vertices dentro: " << dentroArbitro << "\n"
+				<< "[Prueba combate] velocidad maxima de desplazamiento: " << maxVel << " m/s; de un vertice: " << maxVelVertice
+				<< " m/s (t = " << tMaxVelVertice << " s); fuera del golpe: " << maxVelFuera << " m/s (t = " << tMaxVelFuera << " s)"
+				<< std::defaultfloat << std::endl;
+			glfwSetWindowShouldClose(window, GL_TRUE);
+			return;
+		}
+		repeticion++;
+		std::cout << "[Prueba combate] repeticion " << repeticion << std::endl;
+		if (repeticion == 2)
+			pulsar(GLFW_KEY_T);       // Árbitro y combate a la vez: el combate debe esperar
+		pulsar(GLFW_KEY_SPACE);
+		enCurso = true;
+		pulsoDurante = false;
+		siguiente = cuadros = 0;
+		inicio = glfwGetTime();
+		inicioReal = -1.0;
+		return;
+	}
+
+	if (combate.Estado() == EstadoCombate::EnEspera)
+	{
+		if (!arbitro.Activa()) std::cout << "[Prueba combate] ERROR: en espera sin que el arbitro este activo" << std::endl;
+		return;
+	}
+	if (inicioReal < 0.0 && combate.Activa())
+	{
+		inicioReal = glfwGetTime();
+		std::cout << "[Prueba combate] el combate empezo " << inicioReal - inicio << " s despues de pedirlo"
+			<< (repeticion == 2 ? " (esperando al arbitro)" : "") << "; arbitro activo: " << arbitro.Activa() << std::endl;
+	}
+
+	if (combate.Activa())
+	{
+		cuadros++;
+		float t = combate.Tiempo();
+		// Durante el combate: T y Space no deben hacer nada
+		if (repeticion == 2 && !pulsoDurante && t > 2.0f)
+		{
+			pulsar(GLFW_KEY_T);
+			pulsar(GLFW_KEY_SPACE);
+			pulsoDurante = true;
+			std::cout << "[Prueba combate] T y Space durante el combate: arbitro activo " << arbitro.Activa()
+				<< ", tiempo del combate " << combate.Tiempo() << " (sigue " << t << ")" << std::endl;
+		}
+
+		// Mallas deformadas en el mundo
+		static std::vector<glm::vec3> va, vb;
+		A->asset->model->SkinPositions(A->skinPalette, va);
+		B->asset->model->SkinPositions(B->skinPalette, vb);
+		glm::mat4 MA = A->GetMatrix(), MB = B->GetMatrix();
+		for (glm::vec3& v : va) v = glm::vec3(MA * glm::vec4(v, 1.0f));
+		for (glm::vec3& v : vb) v = glm::vec3(MB * glm::vec4(v, 1.0f));
+
+		glm::vec3 amn, amx, bmn, bmx;
+		scene.GetWorldBounds(*arbCuerpo, amn, amx);
+		scene.GetWorldBounds(*arbBrazo, bmn, bmx);
+		amn = glm::min(amn, bmn); amx = glm::max(amx, bmx);
+		for (const std::vector<glm::vec3>* malla : { &va, &vb })
+		{
+			float lona = (malla == &va ? posA0.y : posB0.y);
+			for (const glm::vec3& v : *malla)
+			{
+				minPiso = std::min(minPiso, v.y - lona);
+				minCuerdas = std::min(minCuerdas, limiteCuerdas - std::max(fabsf(v.x), fabsf(v.z)));
+				for (auto& p : postes)
+					if (glm::all(glm::greaterThanEqual(v, p.first)) && glm::all(glm::lessThanEqual(v, p.second))) dentroPostes++;
+				glm::vec3 fuera = glm::max(glm::max(amn - v, v - amx), glm::vec3(0.0f));
+				float d = glm::length(fuera);
+				minArbitro = std::min(minArbitro, d);
+				if (d == 0.0f) dentroArbitro++;
+			}
+		}
+
+		// Distancia entre los cuerpos: rejilla de 10 cm con los vértices del luchador
+		const float CELDA = 0.25f;   // Encuentra cualquier pareja a menos de 25 cm
+		std::unordered_map<long long, std::vector<int>> rejilla;
+		auto clave = [&](int x, int y, int z) { return ((long long)(x + 1000) << 40) | ((long long)(y + 1000) << 20) | (long long)(z + 1000); };
+		for (int i = 0; i < (int)va.size(); i++)
+		{
+			glm::ivec3 c = glm::ivec3(glm::floor(va[i] / CELDA));
+			rejilla[clave(c.x, c.y, c.z)].push_back(i);
+		}
+		float minimo = FLT_MAX;
+		for (const glm::vec3& v : vb)
+		{
+			glm::ivec3 c = glm::ivec3(glm::floor(v / CELDA));
+			for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) for (int dz = -1; dz <= 1; dz++)
+			{
+				auto it = rejilla.find(clave(c.x + dx, c.y + dy, c.z + dz));
+				if (it == rejilla.end()) continue;
+				for (int i : it->second) minimo = std::min(minimo, glm::length(va[i] - v));
+			}
+		}
+		// Penetración: los luchadores se enfrentan a lo largo de X. Para cada columna (y, z) de 2 cm se
+		// guarda el intervalo [frente, espalda] en X de cada cuerpo; un vértice del otro cuerpo dentro de
+		// ese intervalo está dentro de él (aproximación válida para torso, brazos y piernas).
+		{
+			const float COL = 0.02f;
+			auto columnas = [&](const std::vector<glm::vec3>& vs) {
+				std::unordered_map<long long, glm::vec2> c;
+				for (const glm::vec3& v : vs)
+				{
+					long long k = ((long long)(int)floorf(v.y / COL) + 100000) * 1000000LL + ((long long)(int)floorf(v.z / COL) + 100000);
+					auto it = c.find(k);
+					if (it == c.end()) c[k] = glm::vec2(v.x, v.x);
+					else it->second = glm::vec2(std::min(it->second.x, v.x), std::max(it->second.y, v.x));
+				}
+				return c; };
+			auto contar = [&](const std::vector<glm::vec3>& vs, const std::unordered_map<long long, glm::vec2>& c) {
+				for (size_t i = 0; i < vs.size(); i++)
+				{
+					const glm::vec3& v = vs[i];
+					long long k = ((long long)(int)floorf(v.y / COL) + 100000) * 1000000LL + ((long long)(int)floorf(v.z / COL) + 100000);
+					auto it = c.find(k);
+					if (it == c.end() || v.x <= it->second.x || v.x >= it->second.y) continue;
+					float prof = std::min(v.x - it->second.x, it->second.y - v.x);
+					if (prof > 0.005f) { verticesDentro++; maxPenetracion = std::max(maxPenetracion, prof); tPenetracion = t; }
+				} };
+			contar(va, columnas(vb));
+			contar(vb, columnas(va));
+		}
+
+		bool ventanaContacto = t > T_IMPACTO - 0.03f && t < T_IMPACTO + 0.2f;
+		if (!ventanaContacto && minimo < minEntre) { minEntre = minimo; tMinEntre = t; }
+		if (fabsf(t - T_IMPACTO) < 1e-4f)
+			brechaImpacto = minimo;   // En el impacto la pareja más cercana es el brazo con el rival
+
+		// Velocidad de desplazamiento y de cada vértice con el tiempo de la animación (un salto de pose
+		// aparecería como una velocidad enorme)
+		static std::vector<glm::vec3> pa, pb;
+		static float tAnterior = -1.0f;
+		float dtAnim = t - tAnterior;
+		if (tAnterior >= 0.0f && dtAnim > 1e-4f && pa.size() == va.size() && pb.size() == vb.size())
+		{
+			maxVel = std::max(maxVel, std::max(glm::length(A->position - antA), glm::length(B->position - antB)) / dtAnim);
+			bool golpe = t > T_PREPARA && t < T_IMPACTO + 0.2f;   // Brazo y reacción: rápidos a propósito
+			auto revisar = [&](const std::vector<glm::vec3>& ahora, const std::vector<glm::vec3>& antes) {
+				for (size_t i = 0; i < ahora.size(); i++)
+				{
+					float v = glm::length(ahora[i] - antes[i]) / dtAnim;
+					if (v > maxVelVertice) { maxVelVertice = v; tMaxVelVertice = t; }
+					if (!golpe && v > maxVelFuera) { maxVelFuera = v; tMaxVelFuera = t; }
+				} };
+			revisar(va, pa);
+			revisar(vb, pb);
+		}
+		pa = va; pb = vb; tAnterior = t;
+		antA = A->position; antB = B->position;
+
+		// Capturas en instantes exactos: el siguiente cuadro avanza justo hasta el próximo instante
+		if (repeticion == 1 && siguiente < NUM_CAPTURAS && t >= capturas[siguiente].t - 1e-4f)
+		{
+			std::cout << "[Prueba combate] t = " << t << " s, fases: " << combate.FaseActual()
+				<< "; luchador (" << A->position.x << ", " << A->position.y << ", " << A->position.z << ") penta ("
+				<< B->position.x << ", " << B->position.y << ", " << B->position.z << "), distancia entre cuerpos "
+				<< (minimo == FLT_MAX ? std::string("> 0.25") : std::to_string(minimo)) << " m" << std::endl;
+			char nombre[96];
+			snprintf(nombre, sizeof(nombre), "_%02d_%s.png", siguiente + 2, capturas[siguiente].nombre);
+			SaveScreenshot(prefijo + nombre);
+			siguiente++;
+		}
+		limiteDeltaCombate = (repeticion == 1 && siguiente < NUM_CAPTURAS) ? std::max(capturas[siguiente].t - t, 0.0f)
+			: (fabsf(t - T_IMPACTO) > 1e-4f && t < T_IMPACTO ? T_IMPACTO - t : FLT_MAX);
+		if (limiteDeltaCombate <= 0.0f) limiteDeltaCombate = FLT_MAX;
+		return;
+	}
+
+	// Terminó: el cuadro ya muestra el reposo
+	limiteDeltaCombate = FLT_MAX;
+	float errPos = glm::length(A->position - posA0) + glm::length(B->position - posB0);
+	float errRot = glm::length(A->rotation - rotA0) + glm::length(B->rotation - rotB0);
+	double duracion = glfwGetTime() - inicioReal;
+	std::cout << "[Prueba combate] repeticion " << repeticion << " terminada: " << cuadros << " cuadros en " << duracion << " s ("
+		<< cuadros / duracion << " fps, secuencia de " << combate.Duracion() << " s); error final: posicion " << errPos
+		<< " m, rotacion " << errRot << " grados, paletas vacias: " << (A->skinPalette.empty() && B->skinPalette.empty()) << std::endl;
+	if (repeticion == 1)
+		SaveScreenshot(prefijo + "_11_fin.png");
+	enCurso = false;
+}
+
 void ApplyCameraView(int index)
 {
 	if (cameraViews.empty()) return;
@@ -650,6 +1061,123 @@ void DoMovement()
 		camera.ProcessKeyboard(DOWN, deltaTime, speedFactor);
 }
 
+// ---------------- Espectador E: cadenas hombro -> codo y tiro de la cerveza
+
+// Interpola las claves en el instante t. La pose depende solo de t (no se acumula nada).
+glm::vec4 EvaluarClavesE(const ClaveBrazoE* claves, int n, float t)
+{
+	for (int i = 1; i < n; i++)
+		if (t < claves[i].t)
+		{
+			float a = glm::clamp((t - claves[i - 1].t) / (claves[i].t - claves[i - 1].t), 0.0f, 1.0f);
+			float c = claves[i].curva == 'a' ? a * a                                   // acelera
+				: claves[i].curva == 'f' ? 1.0f - (1.0f - a) * (1.0f - a)              // frena
+				: a * a * (3.0f - 2.0f * a);                                           // suave
+			return glm::mix(claves[i - 1].pose, claves[i].pose, c);
+		}
+	return claves[n - 1].pose;
+}
+
+// Giros de la cadena del brazo (marco del modelo, antes del yaw del cuerpo). lado: +1 izq., -1 der.
+struct CadenaBrazoE { glm::mat4 Rh, Rc; glm::vec3 hombro, codo, codoMovido; };
+CadenaBrazoE CadenaE(float lado, glm::vec4 p, glm::vec3 ejeCodo)
+{
+	CadenaBrazoE c;
+	c.hombro = lado > 0.0f ? HOMBRO_IZQ : HOMBRO_DER;
+	c.codo = lado > 0.0f ? CODO_IZQ : CODO_DER;
+	// Rh = Rz(abducción) · Rx(-flexión) · Ry(giro sobre el eje del brazo, que en reposo es vertical)
+	c.Rh = glm::rotate(glm::mat4(1.0f), glm::radians(p.y * lado), glm::vec3(0.0f, 0.0f, 1.0f));
+	c.Rh = glm::rotate(c.Rh, glm::radians(-p.x), glm::vec3(1.0f, 0.0f, 0.0f));
+	c.Rh = glm::rotate(c.Rh, glm::radians(p.z * lado), glm::vec3(0.0f, 1.0f, 0.0f));
+	c.Rc = glm::rotate(glm::mat4(1.0f), glm::radians(p.w), ejeCodo);
+	c.codoMovido = c.hombro + glm::vec3(c.Rh * glm::vec4(c.codo - c.hombro, 0.0f));
+	return c;
+}
+
+glm::mat4 YawCuerpoE() { return EulerRotation(glm::vec3(0.0f, objE_cuerpo->rotation.y, 0.0f)); }
+
+// Punto que va con el antebrazo (coordenadas del modelo de E) llevado al mundo
+glm::vec3 PuntoAntebrazoE(const CadenaBrazoE& c, glm::vec3 punto)
+{
+	glm::vec3 p = c.codoMovido + glm::vec3(c.Rh * c.Rc * glm::vec4(punto - c.codo, 0.0f));
+	return objE_cuerpo->position + glm::vec3(YawCuerpoE() * glm::vec4(p, 0.0f));
+}
+
+// La pieza gira con R (marco del modelo) alrededor de "articulacion", que queda en "destino".
+// "agarre" es el punto del cuerpo donde va el origen del modelo de la pieza (la base de la botella).
+void ColocarPiezaE(SceneObject* pieza, glm::vec3 articulacion, glm::vec3 destino, const glm::mat4& R, glm::vec3 agarre)
+{
+	glm::mat4 yaw = YawCuerpoE();
+	float ry, rx, rz;
+	glm::extractEulerAngleYXZ(yaw * R, ry, rx, rz);              // Mismo orden que EulerRotation
+	pieza->position = objE_cuerpo->position + glm::vec3(yaw * glm::vec4(destino, 0.0f));
+	pieza->rotation = glm::degrees(glm::vec3(rx, ry, rz));
+	pieza->pivotOffset = articulacion - agarre;
+	pieza->scale = glm::vec3(1.0f);
+}
+
+void ColocarBrazoE(const CadenaBrazoE& c, SceneObject* brazo, SceneObject* antebrazo, SceneObject* mano,
+	SceneObject* botella, glm::vec3 agarre)
+{
+	ColocarPiezaE(brazo, c.hombro, c.hombro, c.Rh, glm::vec3(0.0f));
+	ColocarPiezaE(antebrazo, c.codo, c.codoMovido, c.Rh * c.Rc, glm::vec3(0.0f));
+	ColocarPiezaE(mano, c.codo, c.codoMovido, c.Rh * c.Rc, glm::vec3(0.0f));
+	if (botella)
+		ColocarPiezaE(botella, c.codo, c.codoMovido, c.Rh * c.Rc, agarre);
+}
+
+// Tiro de la cerveza: se calcula una sola vez a partir de la pose al soltar (no depende de los FPS).
+// Dirección de salida = dirección de la mano en ese instante (su elevación, limitada para librar las
+// cuerdas); rapidez = la que lleva el tiro parabólico con g = 9.81 m/s² hasta el punto de caída.
+struct TiroCerveza
+{
+	bool listo = false;
+	glm::vec3 inicio, velocidad, fin;
+	float duracion = 1.0f, elevacion = 0.0f, rapidezMano = 0.0f;
+	glm::mat4 giroInicial = glm::mat4(1.0f);     // Rotación de la botella (mundo) al soltarla
+	glm::vec3 ejeGiro = glm::vec3(1.0f, 0.0f, 0.0f);
+	float vueltas = 0.0f;                        // Radianes que gira en el aire hasta caer acostada
+} tiro;
+
+const glm::vec3 EJE_CODO_LANZAR(-1.0f, 0.0f, 0.0f);       // Codo izquierdo: solo plano sagital
+
+void PrepararTiroCerveza()
+{
+	auto centro = [](float t) {
+		return PuntoAntebrazoE(CadenaE(1.0f, EvaluarClavesE(CLAVES_LANZAR, 7, t), EJE_CODO_LANZAR), AGARRE_IZQ + CENTRO_BOTELLA);
+	};
+	const float e = 0.005f;
+	tiro.inicio = centro(SUELTA_CERVEZA);
+	glm::vec3 vMano = (tiro.inicio - centro(SUELTA_CERVEZA - e)) / e;
+	tiro.rapidezMano = glm::length(vMano);
+	tiro.fin = glm::vec3(tiro.inicio.x + CAIDA_CERVEZA.x, BURRITO_FIN.y + RADIO_BOTELLA, CAIDA_CERVEZA.y);
+
+	glm::vec2 horizontal(tiro.fin.x - tiro.inicio.x, tiro.fin.z - tiro.inicio.z);
+	float d = glm::length(horizontal), dy = tiro.fin.y - tiro.inicio.y;
+	float elev = glm::degrees(atan2f(vMano.y, glm::length(glm::vec2(vMano.x, vMano.z))));
+	tiro.elevacion = glm::clamp(elev, ELEVACION_MIN, ELEVACION_MAX);
+	float tanA = tanf(glm::radians(tiro.elevacion));
+	// d = vh·T  y  dy = vh·tanA·T - g·T²/2   ->   T = sqrt(2·(d·tanA - dy) / g)
+	tiro.duracion = sqrtf(std::max(2.0f * (d * tanA - dy) / GRAVEDAD, 0.01f));
+	float vh = d / tiro.duracion;
+	glm::vec2 dir = horizontal / std::max(d, 1e-4f);
+	tiro.velocidad = glm::vec3(dir.x * vh, vh * tanA, dir.y * vh);
+
+	// Gira hacia adelante (como la mano) ~1.5 vueltas y cae acostada: el eje de la botella horizontal
+	CadenaBrazoE c = CadenaE(1.0f, EvaluarClavesE(CLAVES_LANZAR, 7, SUELTA_CERVEZA), EJE_CODO_LANZAR);
+	tiro.giroInicial = YawCuerpoE() * c.Rh * c.Rc;
+	tiro.ejeGiro = glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(dir.x, 0.0f, dir.y)));
+	glm::vec3 a = glm::vec3(tiro.giroInicial * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));   // Eje de la botella
+	glm::vec3 ka = glm::cross(tiro.ejeGiro, a);
+	float acostada = atan2f(-a.y, ka.y);                                            // Ángulo con a.y = 0
+	float pi = glm::pi<float>();
+	tiro.vueltas = acostada + pi * ceilf((glm::radians(450.0f) - acostada) / pi);
+	tiro.listo = true;
+	std::cout << "Cerveza (Z): sale a " << glm::length(tiro.velocidad) << " m/s con " << tiro.elevacion
+		<< " grados (la mano va a " << tiro.rapidezMano << " m/s y " << elev << " grados), vuela "
+		<< tiro.duracion << " s y gira " << glm::degrees(tiro.vueltas) << " grados" << std::endl;
+}
+
 // Lógica de animaciones automáticas y por código.
 // Solo modifica transformaciones de objetos de la escena; el dibujo no cambia.
 void Animation()
@@ -678,124 +1206,103 @@ void Animation()
 	// Árbitro (T): la pose se calcula con el tiempo transcurrido de la secuencia
 	arbitro.Actualizar(deltaTime);
 
-	// Trayectoria parabólica del burrito volador, desde el público hasta el ring
+	// Combate (Space): empieza cuando el árbitro no está en su secuencia
+	float dtCombate = deltaCombateFijo > 0.0f ? deltaCombateFijo : std::min(deltaTime, limiteDeltaCombate);
+	combate.Actualizar(dtCombate, !arbitro.Activa());
+
+	// ---------------- Burrito volador (B): tiro parabólico desde las gradas hasta la lona
 	if (SceneObject* burrito = objBurrito)
 	{
 		burrito->visible = burritoLanzado;
 		if (burritoLanzado)
 		{
-			tiempoVueloBurrito += deltaTime * 0.8f;
-			float t = std::min(tiempoVueloBurrito, 1.0f);
-			burrito->position = glm::mix(BURRITO_INICIO, BURRITO_FIN, t);
-			burrito->position.y += 4.0f * BURRITO_ALTURA * t * (1.0f - t);
-			burrito->rotation.x = 540.0f * t;
-
-			if (tiempoVueloBurrito >= 1.0f)
+			tiempoVueloBurrito += deltaTime;
+			const float vuelo = sqrtf(8.0f * BURRITO_ALTURA / GRAVEDAD);    // Aceleración vertical = g
+			const glm::vec3 fin = BURRITO_FIN + glm::vec3(0.0f, apoyoBurrito, 0.0f);
+			float t = tiempoVueloBurrito, escala = 1.0f;
+			float u = std::min(t / vuelo, 1.0f);
+			burrito->position = glm::mix(BURRITO_INICIO, fin, u);
+			burrito->position.y += 4.0f * BURRITO_ALTURA * u * (1.0f - u);
+			burrito->rotation = glm::vec3(450.0f * u, 0.0f, 0.0f);         // 1¼ vueltas: cae acostado
+			if (t > vuelo + REPOSO_EN_LONA)                                 // Se encoge sobre la lona
+			{
+				float a = std::min((t - vuelo - REPOSO_EN_LONA) / ENCOGER, 1.0f);
+				escala = 1.0f - a * a * (3.0f - 2.0f * a);
+				burrito->position.y = BURRITO_FIN.y + apoyoBurrito * escala;
+			}
+			burrito->scale = glm::vec3(escala);
+			if (t >= vuelo + REPOSO_EN_LONA + ENCOGER)
 			{
 				burritoLanzado = false;
-				tiempoVueloBurrito = 0.0f;
+				burrito->visible = false;
+				burrito->scale = glm::vec3(1.0f);
 			}
 		}
 	}
 
 	// ---------------- Espectador E: lanzar cerveza (Z) y beber (X)
-	if (objE_cuerpo && objE_antebrazoIzq && objE_manoIzq && objE_brazoDer && objE_antebrazoDer
+	if (objE_cuerpo && objE_brazoIzq && objE_antebrazoIzq && objE_manoIzq && objE_brazoDer && objE_antebrazoDer
 		&& objE_manoDer && objCervezaIzq && objCervezaDer)
 	{
-		// Arranque y frenado suaves (0..1 -> 0..1)
-		auto suave = [](float a) { a = glm::clamp(a, 0.0f, 1.0f); return a * a * (3.0f - 2.0f * a); };
+		if (!tiro.listo)
+			PrepararTiroCerveza();
 
-		// Gira una pieza sobre su articulación. "agarre" es el punto del cuerpo donde
-		// se coloca el origen del modelo (la base de la botella en la mano).
-		auto articular = [](SceneObject* pieza, glm::vec3 articulacion, glm::vec3 giro, glm::vec3 agarre)
-		{
-			float yaw = objE_cuerpo->rotation.y;
-			pieza->position = objE_cuerpo->position + glm::vec3(EulerRotation(glm::vec3(0.0f, yaw, 0.0f)) * glm::vec4(articulacion, 0.0f));
-			pieza->rotation = glm::vec3(giro.x, yaw + giro.y, giro.z);
-			pieza->pivotOffset = articulacion - agarre;
-		};
-
-		// Antebrazo izquierdo: giro en X (sube / baja) y en Y (hacia afuera / cruzando)
-		auto poseLanzamiento = [&](float t) -> glm::vec2
-		{
-			const glm::vec2 reposo(0.0f), atras(-105.0f, 35.0f), suelta(-35.0f, -10.0f), remate(5.0f, -15.0f);
-			if (t < 0.45f)                                       // Preparación: lleva la botella atrás
-				return glm::mix(reposo, atras, suave(t / 0.45f));
-			if (t < SUELTA_CERVEZA) {                            // Latigazo: acelera hasta soltar
-				float a = (t - 0.45f) / (SUELTA_CERVEZA - 0.45f);
-				return glm::mix(atras, suelta, a * a);
-			}
-			if (t < 0.85f) {                                     // Seguimiento: frena después de soltar
-				float a = (t - SUELTA_CERVEZA) / (0.85f - SUELTA_CERVEZA);
-				return glm::mix(suelta, remate, 1.0f - (1.0f - a) * (1.0f - a));
-			}
-			return glm::mix(remate, reposo, suave((t - 0.85f) / 0.65f)); // Regreso al reposo
-		};
-
+		// Brazo izquierdo (Z). Fases de la botella: en la mano, en el aire, sobre la lona, se encoge,
+		// y una nueva crece en la mano (con el brazo ya en reposo).
 		if (lanzandoCerveza)
 			tiempoLanzamiento += deltaTime;
-		glm::vec2 g = lanzandoCerveza ? poseLanzamiento(tiempoLanzamiento) : glm::vec2(0.0f);
-		glm::vec3 giroIzq(g.x, g.y, 0.0f);
-		articular(objE_antebrazoIzq, CODO_IZQ, giroIzq, glm::vec3(0.0f));
-		articular(objE_manoIzq, CODO_IZQ, giroIzq, glm::vec3(0.0f));
-
-		if (!cervezaEnVuelo)
+		float t = lanzandoCerveza ? tiempoLanzamiento : 0.0f;
+		CadenaBrazoE izq = CadenaE(1.0f, EvaluarClavesE(CLAVES_LANZAR, 7, t), EJE_CODO_LANZAR);
+		const float cae = SUELTA_CERVEZA + tiro.duracion;
+		const float desaparece = cae + REPOSO_EN_LONA + ENCOGER;
+		const float NUEVA = 0.3f;                                          // Crece la nueva botella
+		bool enMano = !lanzandoCerveza || t < SUELTA_CERVEZA;
+		ColocarBrazoE(izq, objE_brazoIzq, objE_antebrazoIzq, objE_manoIzq, enMano ? objCervezaIzq : nullptr, AGARRE_IZQ);
+		objCervezaIzq->visible = true;
+		if (!enMano && t < desaparece)
 		{
-			if (lanzandoCerveza && tiempoLanzamiento >= SUELTA_CERVEZA)
+			float s = std::min(t - SUELTA_CERVEZA, tiro.duracion);
+			// p(s) = p0 + v·s - g·s²/2 ; gira a velocidad constante alrededor del eje horizontal
+			objCervezaIzq->position = tiro.inicio + tiro.velocidad * s + glm::vec3(0.0f, -0.5f * GRAVEDAD * s * s, 0.0f);
+			glm::mat4 R = glm::rotate(glm::mat4(1.0f), tiro.vueltas * s / tiro.duracion, tiro.ejeGiro) * tiro.giroInicial;
+			float ry, rx, rz;
+			glm::extractEulerAngleYXZ(R, ry, rx, rz);
+			objCervezaIzq->rotation = glm::degrees(glm::vec3(rx, ry, rz));
+			objCervezaIzq->pivotOffset = CENTRO_BOTELLA;                   // Gira sobre su centro
+			float escala = 1.0f;
+			if (t > cae + REPOSO_EN_LONA)
 			{
-				// Suelta: se toma la pose exacta del instante de lanzamiento (no depende de los FPS)
-				glm::vec2 s = poseLanzamiento(SUELTA_CERVEZA);
-				articular(objCervezaIzq, CODO_IZQ, glm::vec3(s.x, s.y, 0.0f), AGARRE_IZQ);
-				inicioCerveza = objCervezaIzq->position + glm::vec3(EulerRotation(objCervezaIzq->rotation)
-					* glm::vec4(CENTRO_BOTELLA - objCervezaIzq->pivotOffset, 0.0f));
-				giroSuelta = objCervezaIzq->rotation;
-				objCervezaIzq->pivotOffset = CENTRO_BOTELLA;     // En el aire gira sobre su centro
-				cervezaEnVuelo = true;
+				float a = std::min((t - cae - REPOSO_EN_LONA) / ENCOGER, 1.0f);
+				escala = 1.0f - a * a * (3.0f - 2.0f * a);
+				objCervezaIzq->position.y = tiro.fin.y + RADIO_BOTELLA * (escala - 1.0f);
 			}
-			else
-				articular(objCervezaIzq, CODO_IZQ, giroIzq, AGARRE_IZQ); // Va en la mano
+			objCervezaIzq->scale = glm::vec3(escala);
 		}
-		if (cervezaEnVuelo)
+		else if (!enMano)
 		{
-			// Misma trayectoria parabólica que el burrito: recta + arco 4h·t·(1-t)
-			float t = std::min((tiempoLanzamiento - SUELTA_CERVEZA) * 0.8f, 1.0f);
-			objCervezaIzq->position = glm::mix(inicioCerveza, BURRITO_FIN, t);
-			objCervezaIzq->position.y += 4.0f * ALTURA_CERVEZA * t * (1.0f - t);
-			objCervezaIzq->rotation = giroSuelta + glm::vec3(540.0f * t, 0.0f, 0.0f);
-			objCervezaIzq->visible = t < 1.0f;
-		}
-		// Al aterrizar (y con el brazo ya en reposo) aparece otra cerveza en la mano
-		if (lanzandoCerveza && tiempoLanzamiento >= SUELTA_CERVEZA + 1.25f + 0.3f)
-		{
-			lanzandoCerveza = false;
-			cervezaEnVuelo = false;
-			objCervezaIzq->visible = true;
-			articular(objCervezaIzq, CODO_IZQ, glm::vec3(0.0f), AGARRE_IZQ);
+			// Nueva botella en la mano: crece desde su base, sobre el regazo
+			float a = std::min((t - desaparece) / NUEVA, 1.0f);
+			objCervezaIzq->position = objE_cuerpo->position + glm::vec3(YawCuerpoE() * glm::vec4(AGARRE_IZQ, 0.0f));
+			objCervezaIzq->rotation = glm::vec3(0.0f, objE_cuerpo->rotation.y, 0.0f);
+			objCervezaIzq->pivotOffset = glm::vec3(0.0f);
+			objCervezaIzq->scale = glm::vec3(a * a * (3.0f - 2.0f * a));
+			if (a >= 1.0f)
+			{
+				lanzandoCerveza = false;
+				ColocarBrazoE(izq, objE_brazoIzq, objE_antebrazoIzq, objE_manoIzq, objCervezaIzq, AGARRE_IZQ);
+			}
 		}
 
-		// Brazo derecho completo gira sobre el hombro (antebrazo, mano y botella lo siguen)
-		float levantar = 0.0f, sorbo = 0.0f;
+		// Brazo derecho (X): sube la botella a la boca, da el trago levantando el codo y baja
 		if (bebiendo)
 		{
 			tiempoBebida += deltaTime;
-			if (tiempoBebida < 0.9f)                             // Sube a la boca
-				levantar = suave(tiempoBebida / 0.9f);
-			else if (tiempoBebida < 1.9f) {                      // Bebe: inclina un poco más la botella
-				levantar = 1.0f;
-				sorbo = 10.0f * (float)sin(glm::pi<float>() * (tiempoBebida - 0.9f));
-			}
-			else                                                 // Baja
-				levantar = 1.0f - suave((tiempoBebida - 1.9f) / 0.9f);
-			if (tiempoBebida >= 2.8f) {
+			if (tiempoBebida >= CLAVES_BEBER[4].t)
 				bebiendo = false;
-				levantar = 0.0f;
-			}
 		}
-		glm::vec3 giroDer(-110.0f * levantar - sorbo, 0.0f, 12.0f * levantar);
-		articular(objE_brazoDer, HOMBRO_DER, giroDer, glm::vec3(0.0f));
-		articular(objE_antebrazoDer, HOMBRO_DER, giroDer, glm::vec3(0.0f));
-		articular(objE_manoDer, HOMBRO_DER, giroDer, glm::vec3(0.0f));
-		articular(objCervezaDer, HOMBRO_DER, giroDer, AGARRE_DER);
+		glm::vec3 ejeCodoDer = glm::normalize(glm::cross(glm::vec3(0.0f, -1.0f, 0.0f), MANO_DER - CODO_DER));
+		CadenaBrazoE der = CadenaE(-1.0f, EvaluarClavesE(CLAVES_BEBER, 5, bebiendo ? tiempoBebida : 0.0f), ejeCodoDer);
+		ColocarBrazoE(der, objE_brazoDer, objE_antebrazoDer, objE_manoDer, objCervezaDer, AGARRE_DER);
 	}
 }
 
@@ -815,7 +1322,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 	if (action == GLFW_PRESS) {
 		// ---- Cámara ----
-		// R: regresar a la vista inicial; 1-6: vistas predefinidas
+		// R: regresar a la vista inicial; 1-8: vistas predefinidas
 		if (key == GLFW_KEY_R)
 			ApplyCameraView(0);
 		if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9 && key - GLFW_KEY_1 < (int)cameraViews.size())
@@ -830,21 +1337,25 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 		// ---- Escena ----
 		// Input 1: Lanzar el burrito desde el público hacia el ring al presionar 'B'
-		if (key == GLFW_KEY_B) {
+		// (mientras el burrito está en el aire o sobre la lona, la tecla no lo reinicia)
+		if (key == GLFW_KEY_B && !burritoLanzado) {
 			burritoLanzado = true;
 			tiempoVueloBurrito = 0.0f;
+			std::cout << "Burrito: lanzado desde las gradas" << std::endl;
 		}
 
-		// Z: el espectador E lanza la cerveza con el antebrazo izquierdo
+		// Z: el espectador E lanza la cerveza con el brazo izquierdo (no se reinicia a mitad del tiro)
 		if (key == GLFW_KEY_Z && !lanzandoCerveza) {
 			lanzandoCerveza = true;
 			tiempoLanzamiento = 0.0f;
+			std::cout << "Espectador E: lanza la cerveza" << std::endl;
 		}
 
-		// X: el espectador E levanta el brazo derecho para beber
+		// X: el espectador E sube la botella derecha a la boca y bebe
 		if (key == GLFW_KEY_X && !bebiendo) {
 			bebiendo = true;
 			tiempoBebida = 0.0f;
+			std::cout << "Espectador E: bebe" << std::endl;
 		}
 
 		// Input 2: Cambiar color de luces en tiempo real al presionar 'L'
@@ -857,13 +1368,19 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 		// Input 3: animación del árbitro con la tecla 'T' (antes era 'A', que también mueve la
 		// cámara). Si la secuencia está en curso se ignora; al terminar se puede repetir.
-		if (key == GLFW_KEY_T && arbitro.Iniciar())
-			std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
-
-		// Input 4: Activar ataque del luchador con la barra espaciadora
-		if (key == GLFW_KEY_SPACE) {
-			animacionLuchador1 = true;
+		if (key == GLFW_KEY_T)
+		{
+			if (combate.Ocupado())
+				std::cout << "Arbitro: espera a que termine el combate" << std::endl;
+			else if (arbitro.Iniciar())
+				std::cout << "Arbitro: inicia la secuencia (" << arbitro.Duracion() << " s)" << std::endl;
 		}
+
+		// Input 4: combate con la barra espaciadora. Repetir la tecla durante el combate no lo reinicia;
+		// si el árbitro está en su secuencia, el combate empieza cuando él termina.
+		if (key == GLFW_KEY_SPACE && combate.Solicitar())
+			std::cout << (arbitro.Activa() ? "Combate: en espera, inicia cuando el arbitro termine" : "Combate: inicia")
+				<< " (" << combate.Duracion() << " s)" << std::endl;
 
 		// ---- Depuración ----
 		if (key == GLFW_KEY_F1) showDebugGrid = !showDebugGrid;
