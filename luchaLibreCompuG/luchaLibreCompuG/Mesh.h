@@ -3,6 +3,8 @@
 #include <string>
 #include <iostream>
 #include <vector>
+#include <utility>
+#include <cmath>
 #include <map>
 #include <cfloat>
 
@@ -26,6 +28,9 @@ struct Vertex
 	glm::vec2 TexCoords;
 	// Color por vértice: multiplica al color base (lo usan las mallas unidas de varios materiales)
 	glm::vec3 Color = glm::vec3(1.0f);
+	// Skinning: hasta 4 huesos por vértice (índice en SkeletonData::bones y peso). Sin animar: pesos 0.
+	glm::ivec4 BoneIDs = glm::ivec4(0);
+	glm::vec4 Weights = glm::vec4(0.0f);
 };
 
 // Propiedades del material que usa Shaders/lighting.frag (struct Material).
@@ -41,6 +46,7 @@ struct Material
 	GLuint diffuseMap = 0;
 	GLuint specularMap = 0;
 	bool alphaTest = false;   // Descarta fragmentos con alfa < 0.1 (recortes como hojas o rejillas)
+	bool skinned = false;     // Malla animada: el vertex shader aplica finalBonesMatrices (lo fija Model al cargar)
 	bool glow = false;        // Haz de luz: sin iluminación, color emisivo * objectGlow, alfa de la textura
 
 	bool IsTransparent() const { return opacity < 0.999f; }
@@ -51,7 +57,7 @@ struct Material
 struct MaterialUniforms
 {
 	GLint diffuseMap, specularMap, hasDiffuseMap, hasSpecularMap;
-	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow;
+	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow, useSkinning;
 
 	static const MaterialUniforms& For(GLuint program)
 	{
@@ -72,8 +78,18 @@ struct MaterialUniforms
 		u.opacity = glGetUniformLocation(program, "material.opacity");
 		u.alphaTest = glGetUniformLocation(program, "material.alphaTest");
 		u.glow = glGetUniformLocation(program, "material.glow");
+			u.useSkinning = glGetUniformLocation(program, "useSkinning");   // -1 en shaders sin skinning: glUniform lo ignora
 		return cache[program] = u;
 	}
+};
+
+// Shape key (morph target): desplazamientos respecto a la malla base, por vértice
+struct MorphTarget
+{
+	std::string name;
+	float defaultWeight = 0.0f;
+	std::vector<glm::vec3> dPos;      // Un valor por vértice
+	std::vector<glm::vec3> dNormal;   // Vacío si el archivo no trae normales del objetivo
 };
 
 class Mesh
@@ -105,6 +121,68 @@ public:
 		this->setupMesh(vertices, indices);
 	}
 
+	// Sustituye la caja envolvente (en mallas animadas se calcula con la pose de reposo, no con los
+	// vértices crudos, que están en el espacio local de la malla)
+	void SetBounds(const glm::vec3& mn, const glm::vec3& mx)
+	{
+		this->boundsMin = mn;
+		this->boundsMax = mx;
+	}
+
+	// ---- Shape keys ----
+	// Se morfea en CPU (posición y normal) y se re-sube el VBO solo cuando cambian los pesos.
+	// Si la malla además tiene huesos, primero se morfea y luego el shader aplica el skinning (orden de glTF).
+	void SetMorph(std::vector<MorphTarget> targets, const std::vector<Vertex>& vertices)
+	{
+		if (targets.empty() || this->VBO == 0) return;
+		this->morphTargets = std::move(targets);
+		this->morphBase = vertices;
+		this->morphWork = vertices;
+		this->morphApplied.clear();
+		glBindBuffer(GL_ARRAY_BUFFER, this->VBO);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(), GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+	}
+
+	bool HasMorph() const { return !this->morphTargets.empty(); }
+
+	std::vector<float> GetMorphDefaults() const
+	{
+		std::vector<float> w;
+		for (const MorphTarget& t : this->morphTargets) w.push_back(t.defaultWeight);
+		return w;
+	}
+
+	void ApplyMorph(const std::vector<float>& w)
+	{
+		if (this->morphTargets.empty() || this->VBO == 0 || w == this->morphApplied) return;
+		this->morphApplied = w;
+
+		// Solo los objetivos con peso: en una simulación horneada cuadro a cuadro (un objetivo por
+		// cuadro) hay cientos de objetivos pero solo 2 activos a la vez
+		std::vector<std::pair<const MorphTarget*, float>> active;
+		for (size_t t = 0; t < this->morphTargets.size() && t < w.size(); t++)
+			if (fabsf(w[t]) > 1e-5f)
+				active.emplace_back(&this->morphTargets[t], w[t]);
+
+		for (size_t v = 0; v < this->morphBase.size(); v++)
+		{
+			glm::vec3 p = this->morphBase[v].Position, n = this->morphBase[v].Normal;
+			for (const auto& a : active)
+			{
+				p += a.second * a.first->dPos[v];
+				if (!a.first->dNormal.empty())
+					n += a.second * a.first->dNormal[v];
+			}
+			this->morphWork[v].Position = p;
+			float len = glm::length(n);
+			this->morphWork[v].Normal = len > 1e-8f ? n / len : this->morphBase[v].Normal;
+		}
+		glBindBuffer(GL_ARRAY_BUFFER, this->VBO);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, this->morphWork.size() * sizeof(Vertex), this->morphWork.data());
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+	}
+
 	// Render the mesh
 	void Draw(Shader& shader) const
 	{
@@ -133,6 +211,7 @@ public:
 		glUniform1f(u.opacity, m.opacity);
 		glUniform1i(u.alphaTest, m.alphaTest);
 		glUniform1i(u.glow, m.glow);
+		glUniform1i(u.useSkinning, m.skinned);
 
 		// Draw mesh
 		glBindVertexArray(this->VAO);
@@ -144,6 +223,9 @@ public:
 private:
 	/*  Render data  */
 	GLuint VAO = 0, VBO = 0, EBO = 0;
+	std::vector<MorphTarget> morphTargets;
+	std::vector<Vertex> morphBase, morphWork;
+	std::vector<float> morphApplied;
 
 	/*  Functions    */
 	// Initializes all the buffer objects/arrays
@@ -181,6 +263,11 @@ private:
 		// Vertex Colors
 		glEnableVertexAttribArray(3);
 		glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)offsetof(Vertex, Color));
+		// Bone IDs (enteros: glVertexAttribIPointer, no se convierten a float) y pesos
+		glEnableVertexAttribArray(4);
+		glVertexAttribIPointer(4, 4, GL_INT, sizeof(Vertex), (GLvoid *)offsetof(Vertex, BoneIDs));
+		glEnableVertexAttribArray(5);
+		glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (GLvoid *)offsetof(Vertex, Weights));
 
 		glBindVertexArray(0);
 	}

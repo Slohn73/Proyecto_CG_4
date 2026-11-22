@@ -4,20 +4,11 @@
 
  Organización:
    ArenaLayout.h  -> qué modelos se cargan y dónde se colocan (posiciones, rotaciones, escalas),
-                     luces y vistas de cámara. Es el archivo a editar para acomodar la escena.
+					 luces y vistas de cámara. Es el archivo a editar para acomodar la escena.
    Scene.h        -> recursos (modelo cargado una vez + normalización) e instancias del escenario.
-   Model.h/Mesh.h -> carga con Assimp, materiales y dibujo.
+   Model.h/Mesh.h -> carga con Assimp, materiales, huesos/animaciones y dibujo.
    Lights.h       -> parámetros de las luces OpenGL.
    DebugDraw.h    -> cuadrícula, ejes y cajas envolventes (solo depuración).
-
- Opciones de línea de comandos (útiles para revisar la escena sin interacción):
-   --galeria                 una instancia de cada modelo en fila, en lugar de la arena
-   --vista N                 vista inicial (1-6)
-   --camara x y z yaw pitch  posición y orientación inicial de la cámara
-   --depuracion              muestra cuadrícula, ejes y cajas envolventes
-   --captura archivo.png     guarda una imagen del primer cuadro estable y termina
-   --captura-todas prefijo   guarda una imagen por cada vista (prefijo_1.png, prefijo_2.png, ...) y termina
-   --segundos N              termina después de N segundos (para medir el rendimiento)
 */
 
 #include <iostream>
@@ -26,6 +17,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 // Librería GLEW
 #include <GL/glew.h>
@@ -40,6 +32,9 @@
 
 // Librería de carga de imágenes
 #include "SOIL2/SOIL2.h"
+
+// Versión de assimp
+#include <assimp/version.h>
 
 // Módulos internos
 #include "Shader.h"
@@ -82,7 +77,7 @@ GLfloat lastFrame = 0.0f;
 // Escena e iluminación
 Scene scene;
 LightRig lightRig;
-std::vector<LightFixture> lightFixtures;   // Luces de la rampa ligadas a sus modelos de reflector
+std::vector<LightFixture> lightFixtures;
 bool luzEscenarioActiva = true;
 glm::vec3 colorLuzSpot(1.0f, 1.0f, 1.0f);
 
@@ -98,28 +93,34 @@ SceneObject* objCinturon = nullptr;
 SceneObject* objBurrito = nullptr;
 std::vector<SceneObject*> objBocinas;
 
+// Bandera animada (GLB) y modelos con esqueleto/animación (FBX / GLB)
+std::vector<SceneObject*> objBanderasAnimadas;
+Model* modeloBanderaAnimada = nullptr;
+Model* modeloArbitro = nullptr;
+Model* modeloLuchador = nullptr;
+std::vector<Model*> modelosAnimados;
+
 // Variables para animaciones por código y procedurales
 float rotacionCinturon = 0.0f;
 float escalaBocina = 1.0f;
+bool animacionBandera = false;
+float tiempoBandera = 0.0f;
 
 // Variables para la animación del Burrito Volador (Idea del equipo)
 bool burritoLanzado = false;
 float tiempoVueloBurrito = 0.0f;
 
 // Animación del espectador E (Z: lanza la cerveza izquierda, X: bebe la derecha).
-// Cada pieza gira alrededor de su articulación con position + rotation + pivotOffset:
-//   T(cuerpo + codo) * R(giro) * T(-codo)  ->  la pieza rota sobre el codo / hombro.
-// Puntos medidos en los OBJ del espectador (metros, coordenadas del modelo).
-SceneObject *objE_cuerpo = nullptr, *objE_antebrazoIzq = nullptr, *objE_manoIzq = nullptr;
-SceneObject *objE_brazoDer = nullptr, *objE_antebrazoDer = nullptr, *objE_manoDer = nullptr;
-SceneObject *objCervezaIzq = nullptr, *objCervezaDer = nullptr;
+SceneObject* objE_cuerpo = nullptr, * objE_antebrazoIzq = nullptr, * objE_manoIzq = nullptr;
+SceneObject* objE_brazoDer = nullptr, * objE_antebrazoDer = nullptr, * objE_manoDer = nullptr;
+SceneObject* objCervezaIzq = nullptr, * objCervezaDer = nullptr;
 const glm::vec3 CODO_IZQ(0.27f, 0.70f, 0.0f);
 const glm::vec3 HOMBRO_DER(-0.26f, 0.95f, -0.03f);
-const glm::vec3 AGARRE_IZQ(0.14f, 0.57f, 0.12f);    // Base de la botella: la mano la toma a ~10 cm
+const glm::vec3 AGARRE_IZQ(0.14f, 0.57f, 0.12f);
 const glm::vec3 AGARRE_DER(-0.14f, 0.57f, 0.12f);
-const glm::vec3 CENTRO_BOTELLA(0.0f, 0.12f, 0.0f);  // La botella mide 24.5 cm
-const float SUELTA_CERVEZA = 0.70f;                  // Segundo en que la mano suelta la botella
-const float ALTURA_CERVEZA = 2.5f;                   // Altura extra del arco parabólico
+const glm::vec3 CENTRO_BOTELLA(0.0f, 0.12f, 0.0f);
+const float SUELTA_CERVEZA = 0.70f;
+const float ALTURA_CERVEZA = 2.5f;
 bool lanzandoCerveza = false;
 bool cervezaEnVuelo = false;
 float tiempoLanzamiento = 0.0f;
@@ -130,7 +131,7 @@ float tiempoBebida = 0.0f;
 
 // Cerveza extra sobre la mesa de comentaristas, junto al pan: mira al ring y brinca
 SceneObject* objCervezaMesa = nullptr;
-glm::vec3 baseCervezaMesa(0.0f);                     // Punto de la mesa donde se apoya
+glm::vec3 baseCervezaMesa(0.0f);
 
 // Estados de animación por teclado / input
 bool animacionLuchador1 = false;
@@ -139,7 +140,7 @@ bool animacionPantalla = false;
 
 int main(int argc, char** argv)
 {
-	// Opciones de línea de comandos
+	std::cout << "Assimp " << aiGetVersionMajor() << "." << aiGetVersionMinor() << "." << aiGetVersionPatch() << std::endl;
 	bool galleryMode = false;
 	bool customCamera = false;
 	int initialView = 0;
@@ -167,17 +168,15 @@ int main(int argc, char** argv)
 		}
 	}
 
-	// Inicialización de GLFW
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 	glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
-	glfwWindowHint(GLFW_SAMPLES, 4); // Antialiasing (MSAA x4)
+	glfwWindowHint(GLFW_SAMPLES, 4);
 
 	GLFWwindow* window = glfwCreateWindow(WIDTH, HEIGHT, "Proyecto Final CG: Lucha Libre Mexicana", nullptr, nullptr);
-
 	if (nullptr == window)
 	{
 		std::cout << "Error al crear la ventana de GLFW" << std::endl;
@@ -186,6 +185,7 @@ int main(int argc, char** argv)
 	}
 
 	glfwMakeContextCurrent(window);
+	glfwSwapInterval(1);   // sincroniza con el monitor (60 fps típicamente)
 	glfwGetFramebufferSize(window, &SCREEN_WIDTH, &SCREEN_HEIGHT);
 
 	glfwSetKeyCallback(window, KeyCallback);
@@ -203,62 +203,27 @@ int main(int argc, char** argv)
 	glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_MULTISAMPLE);
-	// Sin culling: varios modelos tienen superficies de una sola cara (bandera, letreros, pantallas)
 	glDisable(GL_CULL_FACE);
 
-	// ---------------------------------------------------------------- Carga de recursos
-	// Carga de Shaders del proyecto
 	Shader lightingShader("Shaders/lighting.vs", "Shaders/lighting.frag");
 	Shader skyboxShader("Shaders/skybox.vs", "Shaders/skybox.frag");
 	DebugDraw debugDraw;
 
-	// Vértices del cubo para el Skybox
 	float skyboxVertices[] = {
-		// Positions
-		-1.0f,  1.0f, -1.0f,
-		-1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f,  1.0f, -1.0f,
-		-1.0f,  1.0f, -1.0f,
-
-		-1.0f, -1.0f,  1.0f,
-		-1.0f, -1.0f, -1.0f,
-		-1.0f,  1.0f, -1.0f,
-		-1.0f,  1.0f, -1.0f,
-		-1.0f,  1.0f,  1.0f,
-		-1.0f, -1.0f,  1.0f,
-
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-
-		-1.0f, -1.0f,  1.0f,
-		-1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f, -1.0f,  1.0f,
-		-1.0f, -1.0f,  1.0f,
-
-		-1.0f,  1.0f, -1.0f,
-		 1.0f,  1.0f, -1.0f,
-		 1.0f,  1.0f,  1.0f,
-		 1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f,  1.0f,
-		-1.0f,  1.0f, -1.0f,
-
-		-1.0f, -1.0f, -1.0f,
-		-1.0f, -1.0f,  1.0f,
-		 1.0f, -1.0f, -1.0f,
-		 1.0f, -1.0f, -1.0f,
-		-1.0f, -1.0f,  1.0f,
-		 1.0f, -1.0f,  1.0f
+		-1.0f,  1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f,  1.0f,  1.0f, -1.0f, -1.0f,  1.0f, -1.0f,
+		-1.0f, -1.0f,  1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f, -1.0f,
+		-1.0f,  1.0f, -1.0f, -1.0f,  1.0f,  1.0f, -1.0f, -1.0f,  1.0f,
+		 1.0f, -1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,  1.0f,  1.0f, -1.0f,  1.0f, -1.0f, -1.0f,
+		-1.0f, -1.0f,  1.0f, -1.0f,  1.0f,  1.0f,  1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f,  1.0f, -1.0f,  1.0f, -1.0f, -1.0f,  1.0f,
+		-1.0f,  1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f,  1.0f,
+		 1.0f,  1.0f,  1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f, -1.0f,
+		-1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f,  1.0f, -1.0f, -1.0f,
+		 1.0f, -1.0f, -1.0f, -1.0f, -1.0f,  1.0f,  1.0f, -1.0f,  1.0f
 	};
 
-	// Configuración de VAO y VBO para el Skybox
 	GLuint skyboxVAO, skyboxVBO;
 	glGenVertexArrays(1, &skyboxVAO);
 	glGenBuffers(1, &skyboxVBO);
@@ -269,27 +234,19 @@ int main(int argc, char** argv)
 	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
 	glBindVertexArray(0);
 
-	// Carga de las 6 imágenes de la Skybox (orden +X, -X, +Y, -Y, +Z, -Z)
-	std::vector<std::string> faces;
-	faces.push_back("Skybox/skybox_right.png");
-	faces.push_back("Skybox/skybox_left.png");
-	faces.push_back("Skybox/skybox_top.png");
-	faces.push_back("Skybox/skybox_bottom.png");
-	faces.push_back("Skybox/skybox_back.png");
-	faces.push_back("Skybox/skybox_front.png");
-
-	// Las caras superior e inferior vienen giradas 180° respecto a la convención de OpenGL
-	// (se verificó midiendo la continuidad de color en las 12 aristas del cubo).
+	std::vector<std::string> faces = {
+		"Skybox/skybox_right.png", "Skybox/skybox_left.png",
+		"Skybox/skybox_top.png",   "Skybox/skybox_bottom.png",
+		"Skybox/skybox_back.png",  "Skybox/skybox_front.png"
+	};
 	GLuint cubemapTexture = TextureLoader::LoadCubemap(faces, { 0, 0, 2, 2, 0, 0 });
 
-	// Carga de modelos 3D (cada archivo se lee una sola vez)
 	std::cout << "Cargando modelos 3D del escenario..." << std::endl;
 	double loadStart = glfwGetTime();
 	RegisterArenaAssets(scene);
 	scene.LoadAssets();
 	std::cout << "Modelos cargados en " << glfwGetTime() - loadStart << " s" << std::endl;
 
-	// ---------------------------------------------------------------- Configuración de la escena
 	if (galleryMode)
 		BuildGallery(scene, GetGalleryOrder());
 	else
@@ -308,15 +265,46 @@ int main(int argc, char** argv)
 	objCervezaIzq = scene.Find("E_cerveza_izquierda");
 	objCervezaDer = scene.Find("E_cerveza_derecha");
 
-	// Cerveza junto al pan de muerto (misma altura de la mesa), girada 90° para ver al ring (+X)
 	if (SceneObject* pan = scene.Find("pan_de_muerto"))
 	{
 		baseCervezaMesa = pan->position + glm::vec3(-0.1f, 0.0f, -1.5f);
 		objCervezaMesa = &scene.Add("cerveza_mesa", "cerveza_E", "mesa").At(baseCervezaMesa).RotY(90.0f);
 	}
+
 	for (SceneObject& obj : scene.Objects())
+	{
 		if (obj.assetId == "bocina")
 			objBocinas.push_back(&obj);
+
+		// Solo la bandera animada GLB (las estáticas "bandera_entrada" y "bandera_norte" quedan fijas)
+		if (obj.assetId == "bandera_animada")
+		{
+			objBanderasAnimadas.push_back(&obj);
+			if (obj.asset && obj.asset->model)
+				modeloBanderaAnimada = obj.asset->model.get();
+		}
+
+		if (obj.assetId == "arbitro" && obj.asset && obj.asset->model)
+			modeloArbitro = obj.asset->model.get();
+
+		if (obj.assetId == "luchador" && !modeloLuchador && obj.asset && obj.asset->model && obj.asset->model->HasAnimations())
+			modeloLuchador = obj.asset->model.get();
+
+		if (obj.asset && obj.asset->model && obj.asset->model->HasAnimations())
+		{
+			Model* m = obj.asset->model.get();
+			if (std::find(modelosAnimados.begin(), modelosAnimados.end(), m) == modelosAnimados.end())
+				modelosAnimados.push_back(m);
+		}
+	}
+
+	// Recorte de la animación de la bandera (segundos, no frames)
+	if (modeloBanderaAnimada)
+	{
+		modeloBanderaAnimada->PrintAnimations();                    // imprime clips y duración
+		const float fpsBlender = 24.0f;                             // pon los fps de tu escena de Blender
+		modeloBanderaAnimada->SetAnimationRange(0.0f, 89.0f / fpsBlender);   // frames 1..90
+	}
 
 	cameraViews = GetCameraViews();
 	if (galleryMode)
@@ -330,18 +318,16 @@ int main(int argc, char** argv)
 	double titleTimer = 0.0;
 	double loopStart = glfwGetTime();
 
-	// Bucle principal de renderizado
 	while (!glfwWindowShouldClose(window))
 	{
 		GLfloat currentFrame = (GLfloat)glfwGetTime();
 		deltaTime = currentFrame - lastFrame;
 		lastFrame = currentFrame;
 
-		// ------------------------------------------------------------ Actualización
 		glfwPollEvents();
 		DoMovement();
 		Animation();
-		UpdateLightFixtures(lightRig, lightFixtures);   // Las luces de la rampa siguen a sus reflectores
+		UpdateLightFixtures(lightRig, lightFixtures);
 
 		titleTimer += deltaTime;
 		if (titleTimer > 0.25)
@@ -350,7 +336,6 @@ int main(int argc, char** argv)
 			titleTimer = 0.0;
 		}
 
-		// ------------------------------------------------------------ Render
 		glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -367,7 +352,6 @@ int main(int argc, char** argv)
 
 		scene.DrawOpaque(lightingShader);
 
-		// Ayudas de depuración (F1: cuadrícula y ejes, F2: cajas, Tab: objeto seleccionado)
 		if (showDebugGrid || showAllBounds || selectedObject >= 0)
 		{
 			debugDraw.Begin(view, projection);
@@ -383,7 +367,6 @@ int main(int argc, char** argv)
 				if (!obj.asset || !obj.asset->IsReady() || (!selected && (!showAllBounds || !obj.visible)))
 					continue;
 				glm::vec3 color = selected ? glm::vec3(1.0f, 1.0f, 0.0f) : glm::vec3(0.0f, 0.9f, 1.0f);
-				// Caja orientada con el objeto y sus ejes locales en el punto de apoyo
 				debugDraw.DrawBox(obj.GetMatrix(), obj.asset->model->GetBoundsMin(), obj.asset->model->GetBoundsMax(), color);
 				if (selected || showDebugGrid)
 				{
@@ -393,9 +376,7 @@ int main(int argc, char** argv)
 			}
 		}
 
-		// RENDERIZADO DEL SKYBOX (al final: solo ocupa los píxeles que la geometría dejó libres)
-		glDepthFunc(GL_LEQUAL);  // Permite que el skybox se dibuje al fondo (profundidad máxima)
-
+		glDepthFunc(GL_LEQUAL);
 		skyboxShader.Use();
 
 		glm::mat4 viewSkybox = glm::mat4(glm::mat3(view));
@@ -409,13 +390,11 @@ int main(int argc, char** argv)
 		glDrawArrays(GL_TRIANGLES, 0, 36);
 		glBindVertexArray(0);
 
-		glDepthFunc(GL_LESS);    // Restaura la función de profundidad estándar
+		glDepthFunc(GL_LESS);
 
-		// Superficies translúcidas (haces de luz) al final, sobre la geometría y el skybox
 		lightingShader.Use();
 		scene.DrawTransparent(lightingShader);
 
-		// Capturas: F12 en cualquier momento, o --captura (tras unos cuadros para estabilizar)
 		framesRendered++;
 		if (screenshotRequested)
 		{
@@ -449,8 +428,6 @@ int main(int argc, char** argv)
 	return 0;
 }
 
-// ------ FUNCIONES ------
-
 void SaveScreenshot(const std::string& file)
 {
 	glReadBuffer(GL_BACK);
@@ -470,12 +447,11 @@ void ApplyCameraView(int index)
 	std::cout << "Vista " << index + 1 << ": " << v.name << std::endl;
 }
 
-// Recorre los objetos de la escena para inspeccionarlos (Tab / Shift+Tab)
 void SelectObject(int direction)
 {
 	int count = (int)scene.Objects().size();
 	if (count == 0) return;
-	selectedObject = (selectedObject + direction + count + 1) % (count + 1) - 1; // -1 = ninguno
+	selectedObject = (selectedObject + direction + count + 1) % (count + 1) - 1;
 	if (selectedObject >= 0)
 	{
 		std::cout << "Seleccionado: ";
@@ -499,7 +475,6 @@ void UpdateWindowTitle(GLFWwindow* window)
 	glfwSetWindowTitle(window, title.str().c_str());
 }
 
-// Función para mover la cámara mediante teclado
 void DoMovement()
 {
 	GLfloat speedFactor = (keys[GLFW_KEY_LEFT_SHIFT] || keys[GLFW_KEY_RIGHT_SHIFT]) ? 4.0f : 1.0f;
@@ -523,32 +498,47 @@ void DoMovement()
 		camera.ProcessKeyboard(DOWN, deltaTime, speedFactor);
 }
 
-// Lógica de animaciones automáticas y por código.
-// Solo modifica transformaciones de objetos de la escena; el dibujo no cambia.
 void Animation()
 {
+	// 1. Actualizar animaciones de huesos/nodos de Assimp en modelos animados
+	for (Model* m : modelosAnimados)
+		m->UpdateAnimation(deltaTime);
+
+	// 2. Bandera animada GLB (tecla 'G'): si el GLB no trae animación de Assimp, aplica ondeo por código
+	if (animacionBandera)
+	{
+		tiempoBandera += deltaTime;
+		if (!modeloBanderaAnimada || !modeloBanderaAnimada->HasAnimations())
+		{
+			for (SceneObject* bandera : objBanderasAnimadas)
+			{
+				bandera->rotation.z = 6.0f * sinf(tiempoBandera * 3.5f);
+				bandera->rotation.y += 12.0f * cosf(tiempoBandera * 2.5f) * deltaTime;
+			}
+		}
+	}
+
 	// Rotación continua del cinturón de campeonato
 	rotacionCinturon += 45.0f * deltaTime;
 	if (rotacionCinturon >= 360.0f) rotacionCinturon -= 360.0f;
 	if (objCinturon)
 		objCinturon->rotation.y = rotacionCinturon;
 
-	// Vibración procedural de las bocinas utilizando una función senoidal
+	// Vibración procedural de las bocinas
 	escalaBocina = 1.0f + 0.05f * (float)sin(glfwGetTime() * 10.0f);
 	for (SceneObject* bocina : objBocinas)
 		bocina->scale = glm::vec3(escalaBocina);
 
-	// Cerveza de la mesa brincando: |sen| da saltos que rebotan en la mesa
+	// Cerveza de la mesa brincando
 	if (objCervezaMesa)
 	{
-		float salto = fabsf((float)sin(glfwGetTime() * 4.0));      // 0 = en la mesa, 1 = punto más alto
+		float salto = fabsf((float)sin(glfwGetTime() * 4.0));
 		objCervezaMesa->position = baseCervezaMesa + glm::vec3(0.0f, 0.12f * salto, 0.0f);
-		// Al tocar la mesa se aplasta un poco y se ensancha (como si rebotara)
 		float golpe = powf(1.0f - salto, 6.0f);
 		objCervezaMesa->scale = glm::vec3(1.0f + 0.06f * golpe, 1.0f - 0.12f * golpe, 1.0f + 0.06f * golpe);
 	}
 
-	// Trayectoria parabólica del burrito volador, desde el público hasta el ring
+	// Trayectoria parabólica del burrito volador
 	if (SceneObject* burrito = objBurrito)
 	{
 		burrito->visible = burritoLanzado;
@@ -572,35 +562,31 @@ void Animation()
 	if (objE_cuerpo && objE_antebrazoIzq && objE_manoIzq && objE_brazoDer && objE_antebrazoDer
 		&& objE_manoDer && objCervezaIzq && objCervezaDer)
 	{
-		// Arranque y frenado suaves (0..1 -> 0..1)
 		auto suave = [](float a) { a = glm::clamp(a, 0.0f, 1.0f); return a * a * (3.0f - 2.0f * a); };
 
-		// Gira una pieza sobre su articulación. "agarre" es el punto del cuerpo donde
-		// se coloca el origen del modelo (la base de la botella en la mano).
 		auto articular = [](SceneObject* pieza, glm::vec3 articulacion, glm::vec3 giro, glm::vec3 agarre)
-		{
-			float yaw = objE_cuerpo->rotation.y;
-			pieza->position = objE_cuerpo->position + glm::vec3(EulerRotation(glm::vec3(0.0f, yaw, 0.0f)) * glm::vec4(articulacion, 0.0f));
-			pieza->rotation = glm::vec3(giro.x, yaw + giro.y, giro.z);
-			pieza->pivotOffset = articulacion - agarre;
-		};
+			{
+				float yaw = objE_cuerpo->rotation.y;
+				pieza->position = objE_cuerpo->position + glm::vec3(EulerRotation(glm::vec3(0.0f, yaw, 0.0f)) * glm::vec4(articulacion, 0.0f));
+				pieza->rotation = glm::vec3(giro.x, yaw + giro.y, giro.z);
+				pieza->pivotOffset = articulacion - agarre;
+			};
 
-		// Antebrazo izquierdo: giro en X (sube / baja) y en Y (hacia afuera / cruzando)
 		auto poseLanzamiento = [&](float t) -> glm::vec2
-		{
-			const glm::vec2 reposo(0.0f), atras(-105.0f, 35.0f), suelta(-35.0f, -10.0f), remate(5.0f, -15.0f);
-			if (t < 0.45f)                                       // Preparación: lleva la botella atrás
-				return glm::mix(reposo, atras, suave(t / 0.45f));
-			if (t < SUELTA_CERVEZA) {                            // Latigazo: acelera hasta soltar
-				float a = (t - 0.45f) / (SUELTA_CERVEZA - 0.45f);
-				return glm::mix(atras, suelta, a * a);
-			}
-			if (t < 0.85f) {                                     // Seguimiento: frena después de soltar
-				float a = (t - SUELTA_CERVEZA) / (0.85f - SUELTA_CERVEZA);
-				return glm::mix(suelta, remate, 1.0f - (1.0f - a) * (1.0f - a));
-			}
-			return glm::mix(remate, reposo, suave((t - 0.85f) / 0.65f)); // Regreso al reposo
-		};
+			{
+				const glm::vec2 reposo(0.0f), atras(-105.0f, 35.0f), suelta(-35.0f, -10.0f), remate(5.0f, -15.0f);
+				if (t < 0.45f)
+					return glm::mix(reposo, atras, suave(t / 0.45f));
+				if (t < SUELTA_CERVEZA) {
+					float a = (t - 0.45f) / (SUELTA_CERVEZA - 0.45f);
+					return glm::mix(atras, suelta, a * a);
+				}
+				if (t < 0.85f) {
+					float a = (t - SUELTA_CERVEZA) / (0.85f - SUELTA_CERVEZA);
+					return glm::mix(suelta, remate, 1.0f - (1.0f - a) * (1.0f - a));
+				}
+				return glm::mix(remate, reposo, suave((t - 0.85f) / 0.65f));
+			};
 
 		if (lanzandoCerveza)
 			tiempoLanzamiento += deltaTime;
@@ -613,28 +599,25 @@ void Animation()
 		{
 			if (lanzandoCerveza && tiempoLanzamiento >= SUELTA_CERVEZA)
 			{
-				// Suelta: se toma la pose exacta del instante de lanzamiento (no depende de los FPS)
 				glm::vec2 s = poseLanzamiento(SUELTA_CERVEZA);
 				articular(objCervezaIzq, CODO_IZQ, glm::vec3(s.x, s.y, 0.0f), AGARRE_IZQ);
 				inicioCerveza = objCervezaIzq->position + glm::vec3(EulerRotation(objCervezaIzq->rotation)
 					* glm::vec4(CENTRO_BOTELLA - objCervezaIzq->pivotOffset, 0.0f));
 				giroSuelta = objCervezaIzq->rotation;
-				objCervezaIzq->pivotOffset = CENTRO_BOTELLA;     // En el aire gira sobre su centro
+				objCervezaIzq->pivotOffset = CENTRO_BOTELLA;
 				cervezaEnVuelo = true;
 			}
 			else
-				articular(objCervezaIzq, CODO_IZQ, giroIzq, AGARRE_IZQ); // Va en la mano
+				articular(objCervezaIzq, CODO_IZQ, giroIzq, AGARRE_IZQ);
 		}
 		if (cervezaEnVuelo)
 		{
-			// Misma trayectoria parabólica que el burrito: recta + arco 4h·t·(1-t)
 			float t = std::min((tiempoLanzamiento - SUELTA_CERVEZA) * 0.8f, 1.0f);
 			objCervezaIzq->position = glm::mix(inicioCerveza, BURRITO_FIN, t);
 			objCervezaIzq->position.y += 4.0f * ALTURA_CERVEZA * t * (1.0f - t);
 			objCervezaIzq->rotation = giroSuelta + glm::vec3(540.0f * t, 0.0f, 0.0f);
 			objCervezaIzq->visible = t < 1.0f;
 		}
-		// Al aterrizar (y con el brazo ya en reposo) aparece otra cerveza en la mano
 		if (lanzandoCerveza && tiempoLanzamiento >= SUELTA_CERVEZA + 1.25f + 0.3f)
 		{
 			lanzandoCerveza = false;
@@ -643,18 +626,17 @@ void Animation()
 			articular(objCervezaIzq, CODO_IZQ, glm::vec3(0.0f), AGARRE_IZQ);
 		}
 
-		// Brazo derecho completo gira sobre el hombro (antebrazo, mano y botella lo siguen)
 		float levantar = 0.0f, sorbo = 0.0f;
 		if (bebiendo)
 		{
 			tiempoBebida += deltaTime;
-			if (tiempoBebida < 0.9f)                             // Sube a la boca
+			if (tiempoBebida < 0.9f)
 				levantar = suave(tiempoBebida / 0.9f);
-			else if (tiempoBebida < 1.9f) {                      // Bebe: inclina un poco más la botella
+			else if (tiempoBebida < 1.9f) {
 				levantar = 1.0f;
 				sorbo = 10.0f * (float)sin(glm::pi<float>() * (tiempoBebida - 0.9f));
 			}
-			else                                                 // Baja
+			else
 				levantar = 1.0f - suave((tiempoBebida - 1.9f) / 0.9f);
 			if (tiempoBebida >= 2.8f) {
 				bebiendo = false;
@@ -669,7 +651,6 @@ void Animation()
 	}
 }
 
-// Función callback para detectar eventos de teclado (Inputs interactivos)
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode)
 {
 	if (GLFW_KEY_ESCAPE == key && GLFW_PRESS == action)
@@ -685,13 +666,11 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 
 	if (action == GLFW_PRESS) {
 		// ---- Cámara ----
-		// R: regresar a la vista inicial; 1-6: vistas predefinidas
 		if (key == GLFW_KEY_R)
 			ApplyCameraView(0);
 		if (key >= GLFW_KEY_1 && key <= GLFW_KEY_9 && key - GLFW_KEY_1 < (int)cameraViews.size())
 			ApplyCameraView(key - GLFW_KEY_1);
 
-		// C: liberar / capturar el cursor del mouse
 		if (key == GLFW_KEY_C) {
 			mouseCaptured = !mouseCaptured;
 			glfwSetInputMode(window, GLFW_CURSOR, mouseCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
@@ -699,7 +678,15 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 		}
 
 		// ---- Escena ----
-		// Input 1: Lanzar el burrito desde el público hacia el ring al presionar 'B'
+		// G: Activar / pausar animación de la bandera animada GLB
+		if (key == GLFW_KEY_G) {
+			animacionBandera = !animacionBandera;
+			if (modeloBanderaAnimada)
+				modeloBanderaAnimada->ToggleAnimation(0, true);
+			std::cout << "Animacion Bandera GLB: " << (animacionBandera ? "ACTIVADA" : "PAUSADA") << std::endl;
+		}
+
+		// B: Lanzar el burrito desde el público hacia el ring
 		if (key == GLFW_KEY_B) {
 			burritoLanzado = true;
 			tiempoVueloBurrito = 0.0f;
@@ -717,7 +704,7 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 			tiempoBebida = 0.0f;
 		}
 
-		// Input 2: Cambiar color de luces en tiempo real al presionar 'L'
+		// L: Cambiar color de luces en tiempo real
 		if (key == GLFW_KEY_L) {
 			luzEscenarioActiva = !luzEscenarioActiva;
 			colorLuzSpot = luzEscenarioActiva ? glm::vec3(1.0f, 0.2f, 0.2f) : glm::vec3(0.2f, 0.2f, 1.0f);
@@ -725,15 +712,18 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 				light.diffuse = colorLuzSpot;
 		}
 
-		// Input 3: Activar animación del árbitro con la tecla 'T'
-		// (antes era 'A', que también mueve la cámara a la izquierda)
+		// T: Activar / pausar animación del árbitro
 		if (key == GLFW_KEY_T) {
 			animacionArbitro = !animacionArbitro;
+			if (modeloArbitro)
+				modeloArbitro->ToggleAnimation(0, true);
 		}
 
-		// Input 4: Activar ataque del luchador con la barra espaciadora
+		// SPACE: Disparar animación del luchador una vez
 		if (key == GLFW_KEY_SPACE) {
 			animacionLuchador1 = true;
+			if (modeloLuchador)
+				modeloLuchador->TriggerAnimation(0, false);
 		}
 
 		// ---- Depuración ----
@@ -753,7 +743,6 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 	}
 }
 
-// Callback para el movimiento del mouse (Navegación libre en primera persona)
 void MouseCallback(GLFWwindow* window, double xPos, double yPos)
 {
 	if (firstMouse)
@@ -773,7 +762,6 @@ void MouseCallback(GLFWwindow* window, double xPos, double yPos)
 		camera.ProcessMouseMovement(xOffset, yOffset);
 }
 
-// Rueda del mouse: zoom (campo de visión)
 void ScrollCallback(GLFWwindow* window, double xOffset, double yOffset)
 {
 	camera.ProcessMouseScroll((GLfloat)yOffset);

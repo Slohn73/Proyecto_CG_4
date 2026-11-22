@@ -7,3 +7,6 @@ Release
 captura_*.png
 revision_*.log
 revision_*.png
+*.ilk
+*.pdb
+*.exp

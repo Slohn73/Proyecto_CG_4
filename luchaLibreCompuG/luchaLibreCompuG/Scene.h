@@ -20,6 +20,7 @@
 #include <iomanip>
 #include <chrono>
 #include <cfloat>
+#include <algorithm>
 
 #include <GL/glew.h>
 #include <glm/glm.hpp>
@@ -314,6 +315,7 @@ private:
 		GLint modelLoc = glGetUniformLocation(shader.Program, "model");
 		GLint normalLoc = glGetUniformLocation(shader.Program, "normalMatrix");
 		GLint glowLoc = glGetUniformLocation(shader.Program, "objectGlow");
+		GLint bonesLoc = glGetUniformLocation(shader.Program, "finalBonesMatrices");
 		for (const SceneObject& obj : this->objects)
 		{
 			if (!obj.visible || !obj.asset || !obj.asset->IsReady()) continue;
@@ -323,6 +325,14 @@ private:
 			glUniformMatrix4fv(modelLoc, 1, GL_FALSE, glm::value_ptr(model));
 			glUniformMatrix3fv(normalLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
 			glUniform3fv(glowLoc, 1, glm::value_ptr(obj.glowColor));
+			// Pose actual del modelo (la avanza Model::UpdateAnimation desde el main). Se sube en cada pasada
+			// porque el uniform es del programa y otro objeto pudo sobrescribirlo.
+			if (obj.asset->model->HasBones() && bonesLoc >= 0)
+			{
+				const std::vector<glm::mat4>& bones = obj.asset->model->GetBoneMatrices();
+				if (!bones.empty())
+					glUniformMatrix4fv(bonesLoc, static_cast<GLsizei>(std::min<size_t>(bones.size(), MAX_BONES)), GL_FALSE, glm::value_ptr(bones[0]));
+			}
 			obj.asset->model->Draw(shader, pass);
 		}
 	}

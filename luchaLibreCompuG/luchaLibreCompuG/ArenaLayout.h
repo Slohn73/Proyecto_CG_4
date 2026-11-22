@@ -228,6 +228,13 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.options.diffuseOverrides = { { "*", "../textures/FB_SP_MexFlag_MexFlag_BaseColor.1001.png" } };
 	scene.RegisterAsset(a);
 
+	// Bandera animada (GLB con shape keys / animación). La bandera estática "bandera" se conserva.
+	// AJUSTA la ruta al nombre real de tu archivo. La altura se normaliza a 2.3 m, como la estática;
+	// si el GLB incluye asta, cambia targetHeight (o usa unitScale). Pivote al centro: cuelga de position.
+	a = AssetDesc(); a.id = "bandera_animada"; a.path = I + "mexican-flag/source/bandera_animada.glb";
+	a.targetHeight = 7.0f; a.pivot = Pivot::BaseCenter;
+	scene.RegisterAsset(a);
+
 	// Pan de muerto (21 cm) y burrito (18 cm): los OBJ vienen sin MTL, se asigna su textura
 	a = AssetDesc(); a.id = "pan"; a.path = I + "pan-de-muerto/source/Pan_De_Muerto_.obj";
 	a.unitScale = 0.01f;
@@ -505,6 +512,10 @@ inline void BuildArena(Scene& scene)
 	for (int i = 0; i < 2; i++)
 		scene.Add("bocina_esquina_" + std::to_string(i), "bocina", "decoracion").At(bocinas[i]).RotY(FaceYaw(bocinas[i], centro));
 	scene.Add("bandera_norte", "bandera", "decoracion").At(0.0f, 6.0f, GRADAS_FRENTE + fondoGradas + 0.4f).RotY(180.0f);
+	// Bandera animada (GLB) sobre las gradas del lado este, mirando al ring. El main la anima con la tecla G.
+	glm::vec3 posBanderaAnim(7.6f, 0.0f, -7.6f);   // esquina libre de la arena, a nivel del piso
+	scene.Add("bandera_animada_este", "bandera_animada", "decoracion")
+		.At(posBanderaAnim).RotY(FaceYaw(posBanderaAnim, centro));
 
 	// ---------------- Burrito volador: sale de un espectador de las gradas norte hacia la lona
 	BURRITO_INICIO = glm::vec3(2.0f, 2.4f, GRADAS_FRENTE + 2.5f);
