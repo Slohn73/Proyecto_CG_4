@@ -5,13 +5,18 @@
 //  - SkeletonData: se construye UNA vez por modelo (lo llena Model.h al cargar con Assimp) y se
 //    comparte entre todas las instancias. Contiene el árbol de nodos COMPLETO del archivo (incluye
 //    los nodos "$AssimpFbx$" de FBX), los huesos (nodo + offsetMatrix) y los clips de animación.
-//  - Animator: estado de reproducción de UNA instancia (tiempo, clip, velocidad) y sus matrices
-//    finales de huesos. Cada SceneObject animado tiene el suyo, así dos instancias del mismo
-//    modelo pueden estar en poses distintas.
+//  - Animator: estado de reproducción (tiempo, clip, velocidad, transición) y matrices finales de los
+//    huesos. Hay uno por modelo (Model::anim), así que todas las instancias de un modelo comparten pose.
 //
 // Matriz final de un hueso:  global(nodo del hueso) * offsetMatrix
 // El vertex shader la aplica a la posición del archivo (espacio del modelo) y después multiplica
 // por la matriz "model" del objeto, igual que en la ruta estática.
+//
+// Cálculo por cuadro (Animator::evaluate):
+//   SamplePose  -> pose local de cada nodo: interpolación de claves (lineal en posición y escala,
+//                  SLERP en rotación); si hay transición, mezcla con la pose anterior
+//   Compose     -> globales recorriendo la jerarquía padre -> hijo, y matrices finales de los huesos
+// Explicación completa: ANIMACION_ESQUELETICA.md (raíz del repositorio).
 
 #include <string>
 #include <vector>
@@ -88,6 +93,33 @@ namespace AnimMath
 	}
 }
 
+// Transformación local de un nodo en un instante, descompuesta en traslación, rotación y escala.
+// Se guarda así (y no como matriz) para poder mezclar dos poses en una transición suave.
+struct NodePose
+{
+	glm::vec3 position = glm::vec3(0.0f);
+	glm::quat rotation = glm::quat(1.0f, 0.0f, 0.0f, 0.0f);
+	glm::vec3 scale = glm::vec3(1.0f);
+	bool animated = false;   // false: el nodo conserva su matriz de reposo (SkelNode::local) tal cual
+
+	// Local = T * R * S (primero escala, luego rotación, al final traslación)
+	glm::mat4 ToMatrix() const
+	{
+		return glm::translate(glm::mat4(1.0f), this->position) * glm::mat4_cast(this->rotation) * glm::scale(glm::mat4(1.0f), this->scale);
+	}
+
+	// Mezcla de dos poses: lineal en traslación y escala, SLERP (camino corto) en la rotación
+	static NodePose Blend(const NodePose& a, const NodePose& b, float t)
+	{
+		NodePose r;
+		r.position = glm::mix(a.position, b.position, t);
+		r.rotation = glm::normalize(glm::slerp(a.rotation, b.rotation, t));
+		r.scale = glm::mix(a.scale, b.scale, t);
+		r.animated = a.animated || b.animated;
+		return r;
+	}
+};
+
 // Pistas de un nodo dentro de un clip (aiNodeAnim)
 struct NodeChannel
 {
@@ -96,12 +128,15 @@ struct NodeChannel
 	std::vector<KeyQuat> rotations;
 	std::vector<KeyVec3> scales;
 
-	glm::mat4 Sample(float tick, const SkelNode& rest) const
+	// Una pista ausente (p.ej. un canal sin claves de escala) conserva el valor de reposo del nodo
+	NodePose Sample(float tick, const SkelNode& rest) const
 	{
-		glm::vec3 p = AnimMath::Sample(this->positions, tick, rest.restPos);
-		glm::quat r = AnimMath::Sample(this->rotations, tick, rest.restRot);
-		glm::vec3 s = AnimMath::Sample(this->scales, tick, rest.restScale);
-		return glm::translate(glm::mat4(1.0f), p) * glm::mat4_cast(r) * glm::scale(glm::mat4(1.0f), s);
+		NodePose p;
+		p.position = AnimMath::Sample(this->positions, tick, rest.restPos);
+		p.rotation = AnimMath::Sample(this->rotations, tick, rest.restRot);
+		p.scale = AnimMath::Sample(this->scales, tick, rest.restScale);
+		p.animated = true;
+		return p;
 	}
 };
 
@@ -167,22 +202,48 @@ struct SkeletonData
 			clip->morphChannels[i].Sample(tick, out[i]);
 	}
 
-	// Calcula las matrices finales de los huesos. clip = nullptr -> pose de reposo.
-	// 'globals' es memoria de trabajo (se reutiliza entre cuadros para no reservar cada vez).
-	void Evaluate(const AnimationClip* clip, float tick, std::vector<glm::mat4>& globals, std::vector<glm::mat4>& out) const
+	// 1) Transformación local de cada nodo en el instante 'tick' (interpolando las claves del clip).
+	//    Los nodos que el clip no anima (o clip = nullptr) quedan en su pose de reposo.
+	void SamplePose(const AnimationClip* clip, float tick, std::vector<NodePose>& pose) const
+	{
+		pose.resize(this->nodes.size());
+		for (size_t i = 0; i < this->nodes.size(); i++)
+		{
+			const SkelNode& n = this->nodes[i];
+			if (clip && i < clip->channelOfNode.size() && clip->channelOfNode[i] >= 0)
+				pose[i] = clip->channels[clip->channelOfNode[i]].Sample(tick, n);
+			else
+				pose[i] = NodePose{ n.restPos, n.restRot, n.restScale, false };
+		}
+	}
+
+	// 2) Recorre la jerarquía (los padres van antes que los hijos) y calcula
+	//      global(nodo) = global(padre) * local(nodo)
+	//    y la matriz final de cada hueso:
+	//      final(hueso) = global(nodo del hueso) * offsetMatrix
+	//    La offsetMatrix lleva el vértice del espacio de la malla al espacio del hueso en la pose de
+	//    enlace (bind pose); global() lo regresa al espacio del modelo con la pose actual.
+	void Compose(const std::vector<NodePose>& pose, std::vector<glm::mat4>& globals, std::vector<glm::mat4>& out) const
 	{
 		globals.resize(this->nodes.size());
 		out.resize(this->bones.size());
 		for (size_t i = 0; i < this->nodes.size(); i++)
 		{
 			const SkelNode& n = this->nodes[i];
-			glm::mat4 local = n.local;
-			if (clip && i < clip->channelOfNode.size() && clip->channelOfNode[i] >= 0)
-				local = clip->channels[clip->channelOfNode[i]].Sample(tick, n);
+			glm::mat4 local = pose[i].animated ? pose[i].ToMatrix() : n.local;
 			globals[i] = n.parent >= 0 ? globals[n.parent] * local : local;
 		}
 		for (size_t b = 0; b < this->bones.size(); b++)
 			out[b] = globals[this->bones[b].node] * this->bones[b].offset;
+	}
+
+	// Calcula las matrices finales de los huesos. clip = nullptr -> pose de reposo.
+	// 'globals' recibe la matriz global de cada nodo (sirve para dibujar el esqueleto).
+	void Evaluate(const AnimationClip* clip, float tick, std::vector<glm::mat4>& globals, std::vector<glm::mat4>& out) const
+	{
+		std::vector<NodePose> pose;
+		this->SamplePose(clip, tick, pose);
+		this->Compose(pose, globals, out);
 	}
 };
 
@@ -195,11 +256,13 @@ public:
 		this->evaluate();   // Pose de reposo inicial: las matrices siempre son válidas
 	}
 
-	// Reproduce un clip desde el principio
-	bool Play(int clipIndex, bool loop = true)
+	// Reproduce un clip desde el principio. fadeSeconds > 0: transición suave desde la pose visible
+	// (durante ese tiempo se mezcla con el clip nuevo, que ya avanza)
+	bool Play(int clipIndex, bool loop = true, float fadeSeconds = 0.0f)
 	{
-		if (!this->skeleton || clipIndex < 0 || clipIndex >= static_cast<int>(this->skeleton->clips.size()))
+		if (!this->validClip(clipIndex))
 			return false;
+		this->startFade(fadeSeconds);
 		this->clip = clipIndex;
 		this->loop = loop;
 		this->time = this->rangeStart;
@@ -212,6 +275,20 @@ public:
 	bool Play(const std::string& name, bool loop = true)
 	{
 		return this->skeleton && this->Play(this->skeleton->FindClip(name), loop);
+	}
+
+	// Deja la pose de un instante fijo del clip, sin reproducir (p.ej. el primer cuadro como pose de espera)
+	bool ShowFrame(int clipIndex, float seconds, float fadeSeconds = 0.0f)
+	{
+		if (!this->validClip(clipIndex))
+			return false;
+		this->startFade(fadeSeconds);
+		this->clip = clipIndex;
+		this->time = std::max(seconds, 0.0f);
+		this->playing = false;
+		this->finished = false;
+		this->evaluate();
+		return true;
 	}
 
 	void Pause() { this->playing = false; }
@@ -232,12 +309,22 @@ public:
 		this->playing = false;
 		this->finished = false;
 		this->time = 0.0f;
+		this->fadeDuration = 0.0f;
 		this->evaluate();
 	}
 
+	// Avanza con el tiempo real transcurrido (deltaTime en segundos), no con el número de cuadros:
+	// la animación dura lo mismo a 30 o a 144 fps
 	void Update(float deltaTime)
 	{
-		if (!this->playing || this->clip < 0) return;
+		bool fading = this->isFading();
+		if (fading)
+			this->fadeTime = std::min(this->fadeTime + deltaTime, this->fadeDuration);
+		if (!this->playing || this->clip < 0)
+		{
+			if (fading) this->evaluate();   // Transición hacia una pose fija (ShowFrame)
+			return;
+		}
 		float clipDuration = this->skeleton->clips[this->clip].DurationSeconds();
 		// Rango de reproducción: por defecto el clip completo
 		float start = glm::clamp(this->rangeStart, 0.0f, clipDuration);
@@ -264,6 +351,11 @@ public:
 				this->playing = false;
 			}
 		}
+		else if (!this->loop)
+		{
+			this->playing = false;   // Clip de un solo cuadro: termina de inmediato
+			this->finished = true;
+		}
 		this->evaluate();
 	}
 
@@ -284,6 +376,7 @@ public:
 	float GetTime() const { return this->time; }
 	bool IsPlaying() const { return this->playing; }
 	bool HasFinished() const { return this->finished; }
+	bool IsFading() const { return this->isFading(); }
 	int GetClipIndex() const { return this->clip; }
 	int GetClipCount() const { return this->skeleton ? static_cast<int>(this->skeleton->clips.size()) : 0; }
 	std::string GetClipName() const
@@ -291,6 +384,7 @@ public:
 		return (this->skeleton && this->clip >= 0) ? this->skeleton->clips[this->clip].name : std::string("(pose base)");
 	}
 	const std::vector<glm::mat4>& GetBoneMatrices() const { return this->bones; }
+	const std::vector<glm::mat4>& GetNodeGlobals() const { return this->globals; }   // Global de cada nodo (espacio del modelo)
 	const std::vector<std::vector<float>>& GetMorphWeights() const { return this->morphWeights; }   // [canal][objetivo]
 	const AnimationClip* GetClip() const
 	{
@@ -311,12 +405,44 @@ private:
 	std::vector<glm::mat4> globals;
 	std::vector<std::vector<float>> morphWeights;
 
+	// Transición suave: pose congelada al iniciar la transición y avance de la mezcla
+	std::vector<NodePose> pose;       // Última pose local calculada (la que se ve en pantalla)
+	std::vector<NodePose> fadeFrom;
+	float fadeTime = 0.0f;
+	float fadeDuration = 0.0f;
+
+	bool validClip(int clipIndex) const
+	{
+		return this->skeleton && clipIndex >= 0 && clipIndex < static_cast<int>(this->skeleton->clips.size());
+	}
+
+	bool isFading() const { return this->fadeDuration > 0.0f && this->fadeTime < this->fadeDuration; }
+
+	void startFade(float seconds)
+	{
+		this->fadeDuration = 0.0f;
+		if (seconds <= 0.0f || this->pose.empty()) return;
+		this->fadeFrom = this->pose;
+		this->fadeTime = 0.0f;
+		this->fadeDuration = seconds;
+	}
+
 	void evaluate()
 	{
 		if (!this->skeleton) return;
 		const AnimationClip* c = this->clip >= 0 ? &this->skeleton->clips[this->clip] : nullptr;
-		float tick = c ? this->time * c->ticksPerSecond : 0.0f;
-		this->skeleton->Evaluate(c, tick, this->globals, this->bones);
+		// Segundos -> ticks del archivo. Fuera del rango [0, duración] se usa la primera o la última clave.
+		float tick = c ? glm::clamp(this->time * c->ticksPerSecond, 0.0f, c->duration) : 0.0f;
+		this->skeleton->SamplePose(c, tick, this->pose);
+		if (this->fadeDuration > 0.0f && this->fadeFrom.size() == this->pose.size())
+		{
+			float f = glm::clamp(this->fadeTime / this->fadeDuration, 0.0f, 1.0f);
+			f = f * f * (3.0f - 2.0f * f);   // smoothstep: arranca y termina sin brusquedad
+			if (f < 1.0f)
+				for (size_t i = 0; i < this->pose.size(); i++)
+					this->pose[i] = NodePose::Blend(this->fadeFrom[i], this->pose[i], f);
+		}
+		this->skeleton->Compose(this->pose, this->globals, this->bones);
 		this->skeleton->EvaluateMorph(c, tick, this->morphWeights);
 	}
 };

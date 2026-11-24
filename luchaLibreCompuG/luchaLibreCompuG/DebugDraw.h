@@ -1,15 +1,18 @@
 #pragma once
 
-// Ayudas visuales de depuración: cuadrícula del suelo, ejes del mundo y cajas envolventes.
+// Ayudas visuales de depuración: cuadrícula del suelo, ejes del mundo, cajas envolventes y esqueletos.
 // Solo se dibujan cuando se activan con el teclado; no forman parte del render final.
 
 #include <vector>
+#include <string>
+#include <algorithm>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include "Shader.h"
+#include "Animation.h"
 
 class DebugDraw
 {
@@ -79,10 +82,80 @@ public:
 		draw(this->boxVAO, this->boxVertexCount, m, color);
 	}
 
+	// Esqueleto en su pose actual: una línea de cada articulación a la de su padre y una cruz en cada
+	// articulación. La posición de una articulación es la columna de traslación de su matriz global
+	// (global * (0,0,0,1)), llevada al mundo con la matriz del objeto. Se dibuja sin prueba de
+	// profundidad para verlo a través de la malla. Lado izquierdo verde, derecho rojo, centro amarillo.
+	void DrawSkeleton(const glm::mat4& model, const SkeletonData& skeleton, const std::vector<glm::mat4>& globals, float jointSize)
+	{
+		const size_t n = std::min(skeleton.nodes.size(), globals.size());
+		if (n == 0) return;
+
+		// Raíz del esqueleto: el ancestro común más bajo de todos los huesos (en Mixamo, Hips).
+		// Se dibuja todo su subárbol, incluidos los extremos "_end" que no deforman.
+		int root = -1;
+		for (const BoneSlot& bone : skeleton.bones)
+		{
+			if (bone.node < 0 || bone.name.rfind("__rigido__", 0) == 0) continue;
+			if (root < 0) { root = bone.node; continue; }
+			std::vector<int> path;   // Ancestros del hueso
+			for (int a = bone.node; a >= 0; a = skeleton.nodes[a].parent) path.push_back(a);
+			while (root >= 0 && std::find(path.begin(), path.end(), root) == path.end())
+				root = skeleton.nodes[root].parent;
+		}
+		if (root < 0) return;
+
+		std::vector<char> inSkeleton(n, 0);
+		inSkeleton[root] = 1;
+		for (size_t i = root + 1; i < n; i++)   // Los padres siempre van antes que sus hijos
+			inSkeleton[i] = skeleton.nodes[i].parent >= 0 && inSkeleton[skeleton.nodes[i].parent];
+
+		std::vector<float> lines;
+		auto joint = [&](size_t i) { return glm::vec3(model * globals[i] * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)); };
+		for (size_t i = 0; i < n; i++)
+		{
+			if (!inSkeleton[i]) continue;
+			const std::string& name = skeleton.nodes[i].name;
+			glm::vec3 color = name.find("Left") != std::string::npos ? glm::vec3(0.2f, 1.0f, 0.3f)
+				: name.find("Right") != std::string::npos ? glm::vec3(1.0f, 0.3f, 0.3f) : glm::vec3(1.0f, 0.85f, 0.1f);
+			glm::vec3 p = joint(i);
+			int parent = skeleton.nodes[i].parent;
+			if ((int)i != root && parent >= 0)
+				pushLine(lines, joint(parent), p, color);
+			for (int axis = 0; axis < 3; axis++)
+			{
+				glm::vec3 d(0.0f);
+				d[axis] = jointSize;
+				pushLine(lines, p - d, p + d, glm::vec3(1.0f));
+			}
+		}
+
+		if (!this->dynamicVAO)
+		{
+			glGenVertexArrays(1, &this->dynamicVAO);
+			glGenBuffers(1, &this->dynamicVBO);
+			glBindVertexArray(this->dynamicVAO);
+			glBindBuffer(GL_ARRAY_BUFFER, this->dynamicVBO);
+			glEnableVertexAttribArray(0);
+			glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (GLvoid*)0);
+			glEnableVertexAttribArray(1);
+			glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (GLvoid*)(3 * sizeof(float)));
+			glBindVertexArray(0);
+		}
+		glBindBuffer(GL_ARRAY_BUFFER, this->dynamicVBO);
+		glBufferData(GL_ARRAY_BUFFER, lines.size() * sizeof(float), lines.data(), GL_STREAM_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+		glDisable(GL_DEPTH_TEST);
+		draw(this->dynamicVAO, static_cast<GLsizei>(lines.size() / 6), glm::mat4(1.0f), glm::vec3(1.0f));
+		glEnable(GL_DEPTH_TEST);
+	}
+
 private:
 	Shader shader;
 	GLuint gridVAO = 0, axesVAO = 0, boxVAO = 0;
 	GLsizei gridVertexCount = 0, axesVertexCount = 0, boxVertexCount = 0;
+	GLuint dynamicVAO = 0, dynamicVBO = 0;   // Líneas que cambian cada cuadro (esqueleto)
 
 	static void pushLine(std::vector<float>& v, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
 	{

@@ -48,8 +48,14 @@
     <None Include="herramientas\convertir_blend.py">
       <Filter>Herramientas</Filter>
     </None>
+    <None Include="herramientas\exportar_animacion_penta.py">
+      <Filter>Herramientas</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Animation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ArenaLayout.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -66,6 +72,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Model.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PentaAnimado.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Scene.h">

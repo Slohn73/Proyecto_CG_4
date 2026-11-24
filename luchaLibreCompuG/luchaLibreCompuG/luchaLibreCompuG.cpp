@@ -8,7 +8,9 @@
    Scene.h        -> recursos (modelo cargado una vez + normalización) e instancias del escenario.
    Model.h/Mesh.h -> carga con Assimp, materiales, huesos/animaciones y dibujo.
    Lights.h       -> parámetros de las luces OpenGL.
-   DebugDraw.h    -> cuadrícula, ejes y cajas envolventes (solo depuración).
+   DebugDraw.h    -> cuadrícula, ejes, cajas envolventes y esqueletos (solo depuración).
+   Animation.h    -> esqueleto, clips e interpolación de claves (animación esquelética).
+   PentaAnimado.h -> máquina de estados de las animaciones de Penta (entrada y caída).
 */
 
 #include <iostream>
@@ -45,6 +47,7 @@
 #include "Lights.h"
 #include "DebugDraw.h"
 #include "ArenaLayout.h"
+#include "PentaAnimado.h"
 
 // Prototipos de funciones
 void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode);
@@ -56,6 +59,7 @@ void ApplyCameraView(int index);
 void SelectObject(int direction);
 void UpdateWindowTitle(GLFWwindow* window);
 void SaveScreenshot(const std::string& file);
+void PrintGLLimits();
 
 // Dimensiones de la ventana
 const GLuint WIDTH = 1280, HEIGHT = 720;
@@ -83,6 +87,8 @@ glm::vec3 colorLuzSpot(1.0f, 1.0f, 1.0f);
 
 // Herramientas de depuración
 bool showDebugGrid = false;
+bool showSkeleton = false;     // F8: esqueleto de Penta
+int glErrorsReported = 0;
 bool showAllBounds = false;
 int selectedObject = -1;
 int screenshotCounter = 0;
@@ -133,6 +139,9 @@ float tiempoBebida = 0.0f;
 SceneObject* objCervezaMesa = nullptr;
 glm::vec3 baseCervezaMesa(0.0f);
 
+// Penta con animación esquelética (F5 entrada, F6 caída, F7 reiniciar)
+PentaAnimado penta;
+
 // Estados de animación por teclado / input
 bool animacionLuchador1 = false;
 bool animacionArbitro = false;
@@ -149,13 +158,24 @@ int main(int argc, char** argv)
 	std::string captureFile;
 	std::string captureAllPrefix;
 	double runSeconds = 0.0;
+	double captureAfter = -1.0;      // --captura-tras s: la captura se toma tras s segundos en lugar del cuadro 3
+	std::string pentaClip;           // --penta entrada|caida [segundos]
+	float pentaSeconds = -1.0f;      // < 0: reproducir desde el inicio; >= 0: pose congelada en ese instante
 	for (int i = 1; i < argc; i++)
 	{
 		std::string arg = argv[i];
 		if (arg == "--galeria") galleryMode = true;
+		else if (arg == "--esqueleto") showSkeleton = true;
+		else if (arg == "--penta" && i + 1 < argc)
+		{
+			pentaClip = argv[++i];
+			if (i + 1 < argc && argv[i + 1][0] != '-')
+				pentaSeconds = (float)atof(argv[++i]);
+		}
 		else if (arg == "--depuracion") showDebugGrid = showAllBounds = true;
 		else if (arg == "--vista" && i + 1 < argc) initialView = atoi(argv[++i]) - 1;
 		else if (arg == "--captura" && i + 1 < argc) captureFile = argv[++i];
+		else if (arg == "--captura-tras" && i + 1 < argc) captureAfter = atof(argv[++i]);
 		else if (arg == "--captura-todas" && i + 1 < argc) captureAllPrefix = argv[++i];
 		else if (arg == "--segundos" && i + 1 < argc) runSeconds = atof(argv[++i]);
 		else if (arg == "--camara" && i + 5 < argc)
@@ -200,6 +220,7 @@ int main(int argc, char** argv)
 		return EXIT_FAILURE;
 	}
 
+	PrintGLLimits();
 	glViewport(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_MULTISAMPLE);
@@ -298,6 +319,17 @@ int main(int argc, char** argv)
 		}
 	}
 
+	// Penta: solo en la arena (en la galería el objeto se llama distinto y queda en su pose de referencia)
+	if (!galleryMode && penta.Init(scene) && !pentaClip.empty())
+	{
+		bool entrada = pentaClip == "entrada";
+		if (!entrada && pentaClip != "caida")
+			std::cout << "[Penta] AVISO: --penta '" << pentaClip << "' no existe (usa entrada o caida); se usa caida" << std::endl;
+		if (pentaSeconds >= 0.0f) penta.Congelar(entrada, pentaSeconds);
+		else if (entrada) penta.Entrada();
+		else penta.Caida();
+	}
+
 	// Recorte de la animación de la bandera (segundos, no frames)
 	if (modeloBanderaAnimada)
 	{
@@ -317,11 +349,14 @@ int main(int argc, char** argv)
 	int captureView = initialView < 0 ? 0 : initialView;
 	double titleTimer = 0.0;
 	double loopStart = glfwGetTime();
+	lastFrame = (GLfloat)loopStart;   // Si no, el primer deltaTime incluiría toda la carga de modelos
 
 	while (!glfwWindowShouldClose(window))
 	{
 		GLfloat currentFrame = (GLfloat)glfwGetTime();
-		deltaTime = currentFrame - lastFrame;
+		// Tiempo real entre cuadros; se acota para que un bloqueo (arrastrar la ventana, un punto de
+		// interrupción) no adelante de golpe las animaciones
+		deltaTime = std::min(currentFrame - lastFrame, 0.25f);
 		lastFrame = currentFrame;
 
 		glfwPollEvents();
@@ -401,13 +436,33 @@ int main(int argc, char** argv)
 		lightingShader.Use();
 		scene.DrawTransparent(lightingShader);
 
+		// Esqueleto de Penta encima de todo (sin prueba de profundidad)
+		if (showSkeleton)
+		{
+			debugDraw.Begin(view, projection);
+			penta.DibujarEsqueleto(debugDraw);
+		}
+
+		// Errores de OpenGL: en Debug cada cuadro; en Release una vez por segundo (glGetError puede forzar
+		// una sincronización con el driver). Los indicadores de error se conservan hasta consultarlos.
+#ifdef _DEBUG
+		const bool checkGL = true;
+#else
+		const bool checkGL = framesRendered % 60 == 0;
+#endif
+		if (checkGL)
+			for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError())
+				if (glErrorsReported++ < 10)
+					std::cout << "[OpenGL] ERROR 0x" << std::hex << err << std::dec << " cerca del cuadro " << framesRendered << std::endl;
+
 		framesRendered++;
 		if (screenshotRequested)
 		{
 			SaveScreenshot("captura_" + std::to_string(++screenshotCounter) + ".png");
 			screenshotRequested = false;
 		}
-		if (!captureFile.empty() && framesRendered == 3)
+		bool captureNow = captureAfter >= 0.0 ? glfwGetTime() - loopStart >= captureAfter : framesRendered == 3;
+		if (!captureFile.empty() && captureNow)
 		{
 			SaveScreenshot(captureFile);
 			glfwSetWindowShouldClose(window, GL_TRUE);
@@ -429,6 +484,9 @@ int main(int argc, char** argv)
 	double elapsed = glfwGetTime() - loopStart;
 	if (framesRendered > 0 && elapsed > 0.0)
 		std::cout << "Rendimiento: " << framesRendered << " cuadros en " << elapsed << " s (" << framesRendered / elapsed << " fps promedio)" << std::endl;
+	for (GLenum err = glGetError(); err != GL_NO_ERROR; err = glGetError())
+		glErrorsReported++;
+	std::cout << "Errores de OpenGL: " << glErrorsReported << std::endl;
 
 	glfwTerminate();
 	return 0;
@@ -441,6 +499,20 @@ void SaveScreenshot(const std::string& file)
 		std::cout << "Captura guardada en " << file << std::endl;
 	else
 		std::cout << "No se pudo guardar la captura " << file << std::endl;
+}
+
+// Límites de la GPU relevantes para el skinning (ver BoneBuffer en Scene.h)
+void PrintGLLimits()
+{
+	GLint uniformComponents = 0, blockSize = 0, vertexBlocks = 0;
+	glGetIntegerv(GL_MAX_VERTEX_UNIFORM_COMPONENTS, &uniformComponents);
+	glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &blockSize);
+	glGetIntegerv(GL_MAX_VERTEX_UNIFORM_BLOCKS, &vertexBlocks);
+	std::cout << "OpenGL " << glGetString(GL_VERSION) << " | " << glGetString(GL_RENDERER) << std::endl;
+	std::cout << "  uniforms del vertex shader: " << uniformComponents << " componentes; bloque uniforme: " << blockSize
+		<< " bytes (" << blockSize / (int)sizeof(glm::mat4) << " mat4), " << vertexBlocks << " bloques por vertex shader" << std::endl;
+	if (blockSize < MAX_BONES * (int)sizeof(glm::mat4))
+		std::cout << "  AVISO: MAX_BONES (" << MAX_BONES << ") no cabe en un bloque uniforme de esta GPU" << std::endl;
 }
 
 void ApplyCameraView(int index)
@@ -477,6 +549,8 @@ void UpdateWindowTitle(GLFWwindow* window)
 		title << " | " << obj.id << " (" << obj.position.x << ", " << obj.position.y << ", " << obj.position.z << ") rotY "
 			<< obj.rotation.y << (obj.visible ? "" : " [oculto]");
 	}
+	if (penta.Activo())
+		title << " | " << penta.Descripcion();
 	title << " | " << (int)(1.0f / std::max(deltaTime, 0.0001f)) << " fps";
 	glfwSetWindowTitle(window, title.str().c_str());
 }
@@ -509,6 +583,7 @@ void Animation()
 	// 1. Actualizar animaciones de huesos/nodos de Assimp en modelos animados
 	for (Model* m : modelosAnimados)
 		m->UpdateAnimation(deltaTime);
+	penta.Update(deltaTime);   // Cambios de estado y altura sobre la pasarela (después de avanzar su clip)
 
 	// 2. Bandera animada GLB (tecla 'G'): si el GLB no trae animación de Assimp, aplica ondeo por código
 	if (animacionBandera)
@@ -731,6 +806,13 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 			if (modeloLuchador)
 				modeloLuchador->TriggerAnimation(0, false);
 		}
+
+		// ---- Penta (animación esquelética) ----
+		// Solo en GLFW_PRESS: mantener la tecla no reinicia el clip
+		if (key == GLFW_KEY_F5) penta.Entrada();
+		if (key == GLFW_KEY_F6) penta.Caida();
+		if (key == GLFW_KEY_F7) penta.Reiniciar();
+		if (key == GLFW_KEY_F8) showSkeleton = !showSkeleton;
 
 		// ---- Depuración ----
 		if (key == GLFW_KEY_F1) showDebugGrid = !showDebugGrid;

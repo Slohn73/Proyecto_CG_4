@@ -20,14 +20,17 @@
     <None Include="Shaders\skybox.frag" />
     <None Include="Shaders\skybox.vs" />
     <None Include="herramientas\convertir_blend.py" />
+    <None Include="herramientas\exportar_animacion_penta.py" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Animation.h" />
     <ClInclude Include="ArenaLayout.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="DebugDraw.h" />
     <ClInclude Include="Lights.h" />
     <ClInclude Include="Mesh.h" />
     <ClInclude Include="Model.h" />
+    <ClInclude Include="PentaAnimado.h" />
     <ClInclude Include="Scene.h" />
     <ClInclude Include="Shader.h" />
     <ClInclude Include="stb_image.h" />

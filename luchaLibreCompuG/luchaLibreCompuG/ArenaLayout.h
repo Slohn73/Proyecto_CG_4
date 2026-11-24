@@ -51,6 +51,26 @@ inline glm::vec3 BURRITO_INICIO(4.0f, 2.5f, 11.0f);
 inline glm::vec3 BURRITO_FIN(0.0f, 1.3f, 0.0f);
 const float BURRITO_ALTURA = 3.0f;
 
+// Penta (PentaAnimado.h): punto de partida de cada animación. Como los clips traen root motion, el
+// objeto se queda en este punto y el esqueleto se desplaza desde ahí.
+//  - Ring: donde estaba el Penta estático, frente al luchador. La caída lo lleva ~2 m hacia su derecha
+//    (-Z del mundo con este giro), dentro de la lona. Y se ignora: BuildArena lo apoya en la lona.
+//  - Rampa: al salir del arco, mirando al ring (+Z). La entrada avanza 3.5 m y se corre 0.54 m a su
+//    izquierda (+X), por eso arranca 0.27 m a la derecha del eje de la pasarela.
+const glm::vec3 PENTA_RING(1.4f, 0.0f, 0.0f);
+const float PENTA_RING_GIRO = -90.0f;
+const glm::vec3 PENTA_RAMPA(-0.27f, 1.25f, -13.6f);
+const float PENTA_RAMPA_GIRO = 0.0f;
+
+// Altura (m) de la pasarela en la coordenada z del mundo. Medidas de rampa_lucha_libre_texturizada.obj:
+// plataforma plana a 1.25 m entre z local -10.5 y -9; de ahí la pasarela baja en línea recta hasta 0.25 m
+// en z local 0 (extremo del ring). La rampa está colocada en z = -RAMPA_INICIO.
+inline float AlturaPasarela(float zMundo)
+{
+	float z = zMundo + Arena::RAMPA_INICIO;
+	return glm::mix(1.25f, 0.25f, glm::clamp((z + 9.0f) / 9.0f, 0.0f, 1.0f));
+}
+
 // -------------------------------------------------------------------------------------
 //  1. Recursos: archivo, unidades y corrección de orientación/pivote
 // -------------------------------------------------------------------------------------
@@ -150,8 +170,17 @@ inline void RegisterArenaAssets(Scene& scene)
 	a.options.diffuseOverrides = { { "LuchadorMat", "Luchador_Diffuse.png" } };
 	scene.RegisterAsset(a);
 
-	a = AssetDesc(); a.id = "penta"; a.path = I + "penta/source/Taunt.fbx";
-	a.targetHeight = 1.80f;
+	// Penta con animación esquelética: un solo modelo (malla + esqueleto de 41 huesos) con dos clips.
+	//  - Penta_Entrada.fbx: Animaciones_Penta/Animacion_EntradaPenta.fbx sin cambios (clip "Armature|mixamo.com").
+	//  - Penta_Caida.fbx: solo esqueleto + clip "Armature|Caida", reexportado de Animacion_CaidaPenta.blend con
+	//    herramientas/exportar_animacion_penta.py para que use exactamente el mismo esqueleto que la entrada.
+	// Ambos clips traen root motion (el desplazamiento viene en el hueso Hips), por eso el pivote es el
+	// origen del archivo: es el punto del piso donde empieza cada animación. La altura se mide en el
+	// primer cuadro de la entrada, de pie (restPoseClip = 0).
+	a = AssetDesc(); a.id = "penta"; a.path = I + "penta_animado/Penta_Entrada.fbx";
+	a.targetHeight = 1.80f; a.pivot = Pivot::Original;
+	a.options.animationFiles = { "Penta_Caida.fbx" };
+	a.options.restPoseClip = 0;
 	scene.RegisterAsset(a);
 
 	a = AssetDesc(); a.id = "arbitro"; a.path = I + "arbitro-ruper-design/source/manga ralgla_cuello en v.fbx";
@@ -390,9 +419,9 @@ inline void BuildArena(Scene& scene)
 	SceneObject& ring = scene.Add("ring", "ring", "central").At(0.0f, 0.0f, 0.0f);
 	const float lona = PartTopY(scene, ring, "Piso_Ring");   // ~1.22 m
 
-	// Personajes sobre la lona (estáticos por ahora)
+	// Personajes sobre la lona. Penta se mueve entre el ring y la rampa según su animación (PentaAnimado.h).
 	scene.Add("luchador", "luchador", "personajes").At(-1.4f, lona, 0.0f).RotY(90.0f);
-	scene.Add("penta", "penta", "personajes").At(1.4f, lona, 0.0f).RotY(-90.0f);
+	scene.Add("penta", "penta", "personajes").At(PENTA_RING.x, lona, PENTA_RING.z).RotY(PENTA_RING_GIRO);
 	scene.Add("arbitro", "arbitro", "personajes").At(0.3f, lona, -1.9f).RotY(0.0f);
 
 	// Marcador colgante y barras de luminarias alrededor

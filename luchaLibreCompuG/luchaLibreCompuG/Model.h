@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <sstream>
 #include <memory>
+#include <algorithm>
+#include <cctype>
 
 // Shape keys (morph targets). Los objetivos (aiMesh::mAnimMeshes con sus vértices) existen desde Assimp 4.x.
 // Lo SIGUIENTE solo existe en Assimp >= 5.0: nombre y peso por defecto de cada objetivo (aiAnimMesh::mName/mWeight)
@@ -64,6 +66,10 @@ struct ModelOptions
 	// Reflectividad por material (nombre -> 0..1) para el modelo de Fresnel + mapa de entorno (cubemap).
 	// 0 = Phong puro; ~0.3 plástico/barniz; ~0.6-0.9 metal. La clave "*" aplica a todos los materiales.
 	map<string, float> reflectivityOverrides;
+	// Clip cuyo primer cuadro se usa como pose de referencia (cajas envolventes, normalización y pose
+	// sin animación). -1 = transformaciones de los nodos del archivo, que en un FBX exportado desde
+	// Blender son la pose del cuadro en que se exportó, no necesariamente una pose de pie.
+	int restPoseClip = -1;
 };
 
 // Parte original del archivo (nodo/malla) con su caja envolvente; se conserva aunque las
@@ -101,7 +107,7 @@ public:
 	}
 
 	// Draws the model, and thus all its meshes. El shader ya debe tener la matriz "model"
-	// (y, si el modelo está animado, finalBonesMatrices: lo sube Scene::drawPass).
+	// (y, si el modelo está animado, las matrices de los huesos: las sube Scene::drawPass al bloque "Bones").
 	void Draw(Shader& shader, RenderPass pass = RenderPass::All) const
 	{
 		const MaterialUniforms& uniforms = MaterialUniforms::For(shader.Program);
@@ -127,12 +133,15 @@ public:
 	// true si el archivo trae clips (huesos, nodos o shape keys)
 	bool HasAnimations() const { return !this->skeleton.clips.empty(); }
 	int GetAnimationCount() const { return static_cast<int>(this->skeleton.clips.size()); }
-	// true si trae huesos (o mallas rígidas animables): Scene sube finalBonesMatrices
+	// true si trae huesos (o mallas rígidas animables): Scene sube sus matrices al bloque "Bones"
 	bool HasBones() const { return this->skeleton.IsAnimated(); }
 	const SkeletonData& GetSkeleton() const { return this->skeleton; }
 	const vector<glm::mat4>& GetRestBones() const { return this->restBones; }
 	const vector<glm::mat4>& GetBoneMatrices() const { return this->animator ? this->animator->GetBoneMatrices() : this->restBones; }
+	// Matriz global (espacio del archivo) de cada nodo de SkeletonData::nodes en la pose actual
+	const vector<glm::mat4>& GetNodeGlobals() const { return this->animator ? this->animator->GetNodeGlobals() : this->restGlobals; }
 	Animator* GetAnimator() { return this->HasAnimations() ? &this->anim() : nullptr; }
+	int FindAnimation(const string& name) const { return this->skeleton.FindClip(name); }
 
 	// Avanzar (una vez por cuadro, con el deltaTime)
 	void UpdateAnimation(float deltaTime)
@@ -142,11 +151,20 @@ public:
 		this->applyMorphs();
 	}
 
-	// Reproduce el clip desde el inicio (loop = false: una sola vez y se queda en el último fotograma)
-	void TriggerAnimation(int clip, bool loop = false)
+	// Reproduce el clip desde el inicio (loop = false: una sola vez y se queda en el último fotograma).
+	// fadeSeconds > 0: transición suave desde la pose actual.
+	void TriggerAnimation(int clip, bool loop = false, float fadeSeconds = 0.0f)
 	{
 		if (!this->HasAnimations()) return;
-		this->anim().Play(clip, loop);
+		this->anim().Play(clip, loop, fadeSeconds);
+		this->applyMorphs();
+	}
+
+	// Pose fija de un instante del clip (sin reproducir)
+	void ShowAnimationFrame(int clip, float seconds, float fadeSeconds = 0.0f)
+	{
+		if (!this->HasAnimations()) return;
+		this->anim().ShowFrame(clip, seconds, fadeSeconds);
 		this->applyMorphs();
 	}
 
@@ -229,11 +247,14 @@ public:
 		if (!this->HasAnimations() && !this->skeleton.IsAnimated()) return;
 		cout << "  esqueleto: " << this->skeleton.bones.size() << " huesos, " << this->skeleton.nodes.size() << " nodos, "
 			<< this->skeleton.clips.size() << " animaciones" << endl;
+		if (this->skinnedVertices + this->unweightedVertices > 0)
+			cout << "  skinning: " << this->skinnedVertices << " vertices con pesos (max. 4 por vertice, suma 1), "
+				<< this->unweightedVertices << " sin pesos (siguen al nodo de su malla)" << endl;
 		for (size_t i = 0; i < this->skeleton.clips.size(); i++)
 		{
 			const AnimationClip& c = this->skeleton.clips[i];
-			cout << "    [" << i << "] '" << c.name << "' " << c.DurationSeconds() << " s, " << c.channels.size() << " canales, "
-				<< c.morphChannels.size() << " canales de shape keys" << endl;
+			cout << "    [" << i << "] '" << c.name << "' " << c.DurationSeconds() << " s (" << c.duration << " ticks a "
+				<< c.ticksPerSecond << " ticks/s), " << c.channels.size() << " canales, " << c.morphChannels.size() << " canales de shape keys" << endl;
 		}
 	}
 
@@ -268,8 +289,12 @@ private:
 	/*  Animación (solo se llena si el archivo trae huesos o animaciones)  */
 	SkeletonData skeleton;                            // Compartido por todas las instancias del modelo
 	vector<glm::mat4> restBones;                      // Matrices finales en pose de reposo
+	vector<glm::mat4> restGlobals;                    // Globales de los nodos en pose de reposo
 	bool animated = false;                            // Todas sus mallas usan (o pueden usar) skinning
+	bool bakeSkinnedNodes = false;                    // FBX: la malla con piel lleva horneada la transformación de su nodo (ver processMesh)
 	bool warnedBoneLimit = false;
+	size_t skinnedVertices = 0;                       // Vértices con pesos de huesos (renormalizados a suma 1)
+	size_t unweightedVertices = 0;                    // Vértices de mallas con huesos que no traían pesos
 	unique_ptr<Animator> animator;                    // Se crea la primera vez que se usa
 
 	// Malla de dibujo con shape keys (no se une con otras) y a qué canales de clip responde
@@ -280,7 +305,13 @@ private:
 
 	Animator& anim()
 	{
-		if (!this->animator) this->animator = make_unique<Animator>(&this->skeleton);
+		if (!this->animator)
+		{
+			this->animator = make_unique<Animator>(&this->skeleton);
+			// Sin clip activo se muestra la misma pose de referencia que se usó para las cajas
+			if (this->options.restPoseClip >= 0)
+				this->animator->ShowFrame(this->options.restPoseClip, 0.0f);
+		}
 		return *this->animator;
 	}
 	unordered_map<const aiNode*, int> nodeIndexOf;    // Solo durante la carga: aiNode -> índice en skeleton.nodes
@@ -327,6 +358,9 @@ private:
 		string normalized = TextureLoader::NormalizePath(path);
 		size_t slash = normalized.find_last_of('/');
 		this->directory = (slash == string::npos) ? "." : normalized.substr(0, slash);
+		string ext = std::filesystem::path(normalized).extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+		this->bakeSkinnedNodes = ext == ".fbx";
 
 		// ¿Trae esqueleto o animaciones? Entonces el modelo entero se trata como animado
 		this->animated = !this->options.animationFiles.empty() || scene->mNumAnimations > 0;
@@ -519,18 +553,20 @@ private:
 	// Hueso sintético (offset identidad) para una malla sin skin colgada del nodo 'node'.
 	// Los vértices quedan en el espacio local del nodo y el hueso aporta la transformación global
 	// (animada). Devuelve -1 si no hay lugar: esa malla se queda estática con el nodo "horneado".
-	int rigidSlot(int node)
+	// Con 'offset' distinto de la identidad se crea un hueso propio (no se comparte por nodo).
+	int rigidSlot(int node, const glm::mat4& offset = glm::mat4(1.0f))
 	{
+		bool shared = sameMatrix(offset, glm::mat4(1.0f));
 		auto it = this->rigidSlotOfNode.find(node);
-		if (it != this->rigidSlotOfNode.end()) return it->second;
+		if (shared && it != this->rigidSlotOfNode.end()) return it->second;
 
 		int slot = -1;
 		if (this->skeleton.bones.size() < static_cast<size_t>(MAX_BONES))
 		{
 			slot = static_cast<int>(this->skeleton.bones.size());
-			this->skeleton.bones.push_back({ "__rigido__" + this->skeleton.nodes[node].name, node, glm::mat4(1.0f) });
+			this->skeleton.bones.push_back({ "__rigido__" + this->skeleton.nodes[node].name, node, offset });
 		}
-		this->rigidSlotOfNode[node] = slot;
+		if (shared) this->rigidSlotOfNode[node] = slot;
 		return slot;
 	}
 
@@ -546,7 +582,8 @@ private:
 	}
 
 	// Reparte los pesos de los huesos de una malla a sus vértices
-	void fillBoneWeights(const aiMesh* mesh, vector<Vertex>& vertices, int meshNode)
+	// 'baked' es la transformación ya aplicada a los vértices (identidad salvo en FBX, ver processMesh)
+	void fillBoneWeights(const aiMesh* mesh, vector<Vertex>& vertices, int meshNode, const glm::mat4& baked)
 	{
 		for (unsigned int b = 0; b < mesh->mNumBones; b++)
 		{
@@ -577,10 +614,15 @@ private:
 			if (sum > 1e-5f)
 			{
 				v.Weights /= sum;
+				this->skinnedVertices++;
 				continue;
 			}
-			// Vértice sin pesos: sigue al nodo de su malla (como una malla rígida)
-			if (fallback == -2) fallback = this->rigidSlot(meshNode);
+			this->unweightedVertices++;
+			// Vértice sin pesos: sigue al nodo de su malla (como una malla rígida). Si la transformación
+			// de reposo del nodo ya está horneada, el offset la deshace para no aplicarla dos veces:
+			//   global(nodo) * inverse(reposo horneado) * v
+			if (fallback == -2)
+				fallback = sameMatrix(baked, glm::mat4(1.0f)) ? this->rigidSlot(meshNode) : this->rigidSlot(meshNode, glm::inverse(baked));
 			if (fallback >= 0)
 			{
 				v.BoneIDs = glm::ivec4(fallback, 0, 0, 0);
@@ -685,8 +727,11 @@ private:
 		// Pose de reposo: las cajas envolventes (y con ellas la normalización de Scene) salen de ahí
 		if (this->animated)
 		{
-			vector<glm::mat4> globals;
-			this->skeleton.Evaluate(nullptr, 0.0f, globals, this->restBones);
+			int c = this->options.restPoseClip;
+			const AnimationClip* restClip = (c >= 0 && c < static_cast<int>(this->skeleton.clips.size())) ? &this->skeleton.clips[c] : nullptr;
+			if (c >= 0 && !restClip)
+				cout << "  [Anim] AVISO: restPoseClip " << c << " no existe; se usa la pose de los nodos" << endl;
+			this->skeleton.Evaluate(restClip, 0.0f, this->restGlobals, this->restBones);
 		}
 
 		for (MeshData& data : this->pending)
@@ -853,9 +898,13 @@ private:
 
 		// Modelos estáticos: la transformación del nodo se aplica una sola vez aquí (se "hornea").
 		// Modelos animados:
-		//  - Malla con huesos: sus vértices se quedan en el espacio de la malla. La transformación del
-		//    nodo de la malla NO se aplica (así lo define glTF y es lo que espera la offsetMatrix): la
-		//    posición final sale de  global(hueso) * offsetMatrix.
+		//  - Malla con huesos: la posición final sale de  global(hueso) * offsetMatrix * vértice.
+		//    · FBX: la offsetMatrix de Assimp lleva del espacio del MODELO en la pose de enlace al espacio
+		//      del hueso, así que el vértice debe llevar ya la transformación global de su nodo de malla.
+		//      En FBX de Blender ese nodo trae la escala del objeto y de unidades (x2000 en Penta); en FBX
+		//      de Mixamo es la identidad, por eso no importaba.
+		//    · glTF (y los demás formatos, sin verificar): los vértices se quedan en el espacio de la malla;
+		//      glTF ignora por especificación la transformación del nodo de una malla con piel.
 		//  - Malla sin huesos: sus vértices quedan en el espacio local de su nodo y un hueso sintético
 		//    (offset identidad) le aplica la transformación global del nodo, animada o no.
 		bool skinned = false;
@@ -864,14 +913,18 @@ private:
 		if (this->animated && nodeIndex >= 0)
 		{
 			if (mesh->HasBones())
+			{
 				skinned = true;
+				if (!this->bakeSkinnedNodes)
+					transform = glm::mat4(1.0f);
+			}
 			else
 			{
 				rigid = this->rigidSlot(nodeIndex);
 				skinned = rigid >= 0;
+				if (skinned)
+					transform = glm::mat4(1.0f);
 			}
-			if (skinned)
-				transform = glm::mat4(1.0f);
 		}
 
 		// Las normales usan la inversa transpuesta para soportar escalas no uniformes o negativas.
@@ -916,7 +969,7 @@ private:
 		{
 			if (mesh->HasBones())
 			{
-				this->fillBoneWeights(mesh, vertices, nodeIndex);
+				this->fillBoneWeights(mesh, vertices, nodeIndex, transform);
 			}
 			else
 			{
@@ -1105,14 +1158,30 @@ private:
 			return 0;
 		}
 
-		string file = this->findTextureFile(reference);
-		if (file.empty())
+		// 1) El archivo exacto que indica el modelo
+		string ref = TextureLoader::NormalizePath(reference);
+		string direct = std::filesystem::path(ref).is_absolute() ? ref : this->directory + "/" + ref;
+		if (TextureLoader::FileExists(direct))
+			return TextureLoader::LoadFromFile(direct);
+
+		// 2) FBX con texturas incrustadas referenciadas por nombre ("Archivo.fbm\0.jpg") en lugar de "*N":
+		//    la copia que viene dentro del modelo es la original, antes que un archivo de nombre parecido
+		if (const aiTexture* tex = scene->GetEmbeddedTexture(reference.c_str()))
 		{
-			cout << "  [Textura] ERROR: el material '" << materialName << "' usa '" << reference
-				<< "', que no existe junto al modelo. Se usara el color del material." << endl;
-			return 0;
+			string key = this->path + "|" + reference;
+			if (tex->mHeight == 0)
+				return TextureLoader::LoadFromMemory(key, reinterpret_cast<const unsigned char*>(tex->pcData), static_cast<int>(tex->mWidth));
+			return TextureLoader::LoadFromTexels(key, reinterpret_cast<const unsigned char*>(tex->pcData), tex->mWidth, tex->mHeight);
 		}
-		return TextureLoader::LoadFromFile(file);
+
+		// 3) Búsqueda aproximada (mismo nombre en las carpetas habituales u otra extensión)
+		string file = this->findTextureFile(reference);
+		if (!file.empty())
+			return TextureLoader::LoadFromFile(file);
+
+		cout << "  [Textura] ERROR: el material '" << materialName << "' usa '" << reference
+			<< "', que no existe junto al modelo. Se usara el color del material." << endl;
+		return 0;
 	}
 
 	// Busca el archivo de una textura. Primero la ruta indicada por el modelo; si no existe

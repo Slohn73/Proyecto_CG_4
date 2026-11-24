@@ -90,6 +90,52 @@ inline void TransformBounds(const glm::mat4& m, const glm::vec3& mn, const glm::
 	}
 }
 
+// Matrices finales de los huesos en un Uniform Buffer Object (bloque "Bones" de lighting.vs).
+// Un arreglo de uniforms normal compite con GL_MAX_VERTEX_UNIFORM_COMPONENTS, cuyo mínimo garantizado
+// en OpenGL 3.3 es 1024 floats (64 mat4): 100 huesos no caben en todas las GPU. Un bloque uniforme
+// tiene garantizados 16 KB (GL_MAX_UNIFORM_BLOCK_SIZE), es decir 256 mat4.
+class BoneBuffer
+{
+public:
+	static constexpr GLuint BINDING = 0;   // Punto de enlace compartido por el buffer y el bloque del shader
+
+	// Enlaza el bloque "Bones" del programa al punto BINDING (una vez por programa)
+	void Attach(GLuint program)
+	{
+		this->create();
+		if (std::find(this->programs.begin(), this->programs.end(), program) != this->programs.end()) return;
+		this->programs.push_back(program);
+		GLuint block = glGetUniformBlockIndex(program, "Bones");
+		if (block != GL_INVALID_INDEX)
+			glUniformBlockBinding(program, block, BINDING);
+	}
+
+	void Upload(const std::vector<glm::mat4>& bones)
+	{
+		this->create();
+		size_t count = std::min<size_t>(bones.size(), MAX_BONES);
+		if (count == 0) return;
+		glBindBuffer(GL_UNIFORM_BUFFER, this->ubo);
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, count * sizeof(glm::mat4), glm::value_ptr(bones[0]));
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+	}
+
+private:
+	GLuint ubo = 0;
+	std::vector<GLuint> programs;
+
+	void create()
+	{
+		if (this->ubo) return;
+		glGenBuffers(1, &this->ubo);
+		glBindBuffer(GL_UNIFORM_BUFFER, this->ubo);
+		// std140: un mat4 ocupa 64 bytes, sin relleno extra entre elementos del arreglo
+		glBufferData(GL_UNIFORM_BUFFER, MAX_BONES * sizeof(glm::mat4), nullptr, GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_UNIFORM_BUFFER, 0);
+		glBindBufferBase(GL_UNIFORM_BUFFER, BINDING, this->ubo);
+	}
+};
+
 struct SceneObject
 {
 	std::string id;
@@ -310,12 +356,14 @@ private:
 		TransformBounds(asset.normalization, asset.model->GetBoundsMin(), asset.model->GetBoundsMax(), asset.localMin, asset.localMax);
 	}
 
+	BoneBuffer boneBuffer;
+
 	void drawPass(Shader& shader, RenderPass pass)
 	{
 		GLint modelLoc = glGetUniformLocation(shader.Program, "model");
 		GLint normalLoc = glGetUniformLocation(shader.Program, "normalMatrix");
 		GLint glowLoc = glGetUniformLocation(shader.Program, "objectGlow");
-		GLint bonesLoc = glGetUniformLocation(shader.Program, "finalBonesMatrices");
+		this->boneBuffer.Attach(shader.Program);
 		for (const SceneObject& obj : this->objects)
 		{
 			if (!obj.visible || !obj.asset || !obj.asset->IsReady()) continue;
@@ -326,13 +374,9 @@ private:
 			glUniformMatrix3fv(normalLoc, 1, GL_FALSE, glm::value_ptr(normalMatrix));
 			glUniform3fv(glowLoc, 1, glm::value_ptr(obj.glowColor));
 			// Pose actual del modelo (la avanza Model::UpdateAnimation desde el main). Se sube en cada pasada
-			// porque el uniform es del programa y otro objeto pudo sobrescribirlo.
-			if (obj.asset->model->HasBones() && bonesLoc >= 0)
-			{
-				const std::vector<glm::mat4>& bones = obj.asset->model->GetBoneMatrices();
-				if (!bones.empty())
-					glUniformMatrix4fv(bonesLoc, static_cast<GLsizei>(std::min<size_t>(bones.size(), MAX_BONES)), GL_FALSE, glm::value_ptr(bones[0]));
-			}
+			// porque el buffer es compartido y otro objeto animado pudo sobrescribirlo.
+			if (obj.asset->model->HasBones())
+				this->boneBuffer.Upload(obj.asset->model->GetBoneMatrices());
 			obj.asset->model->Draw(shader, pass);
 		}
 	}

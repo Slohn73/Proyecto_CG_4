@@ -19,7 +19,14 @@ uniform mat4 view;
 uniform mat4 projection;
 
 uniform bool useSkinning;                     // Lo fija Mesh::Draw (solo las mallas animadas)
-uniform mat4 finalBonesMatrices[MAX_BONES];   // Lo sube Scene::drawPass una vez por objeto
+
+// Matrices finales de los huesos: final = global(hueso) * offsetMatrix. Van en un bloque uniforme
+// (Uniform Buffer Object, lo llena Scene::drawPass) porque su tamaño mínimo garantizado (16 KB) sí
+// alcanza para 100 mat4 en cualquier GPU con OpenGL 3.3.
+layout (std140) uniform Bones
+{
+    mat4 finalBonesMatrices[MAX_BONES];
+};
 
 void main()
 {
@@ -28,7 +35,10 @@ void main()
 
     if (useSkinning)
     {
-        // Skinning lineal (LBS): mezcla de las matrices finales de los huesos que afectan al vértice
+        // Skinning lineal (Linear Blend Skinning):  v' = sum_i( w_i * final[id_i] ) * v,  con sum_i(w_i) = 1
+        // La normal usa la parte 3x3 de la misma matriz. Es exacto si los huesos solo rotan y escalan de
+        // forma uniforme (así ocurre en los personajes del proyecto; en Penta se comprobó) y normalize()
+        // quita la escala; con escalas no uniformes haría falta la inversa transpuesta.
         mat4 skin = mat4(0.0);
         float total = 0.0;
         for (int i = 0; i < 4; i++)
