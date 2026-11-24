@@ -234,15 +234,26 @@ inline void RegisterArenaAssets(Scene& scene)
 
 	// Reflector pequeño (0.38 m). Su origen es el punto de montaje superior y se respeta para
 	// colgarlo. La lente apunta a +X en el archivo.
-	a = AssetDesc(); a.id = "reflector"; a.path = I + "simple-spotlight/source/Spotlight/source/Spotlight.fbx";
-	a.unitScale = 0.01f; a.pivot = Pivot::Original; a.baseRotation = glm::vec3(0.0f, -90.0f, 0.0f);
-	scene.RegisterAsset(a);
+	//a = AssetDesc(); a.id = "reflector"; a.path = I + "simple-spotlight/source/Spotlight/source/Spotlight.fbx";
+	//a = AssetDesc(); a.id = "reflector"; a.path = I + "simple-spotlight/source/Spotlight/source/Spotlight.fbx";
+	//a.unitScale = 0.01f; a.pivot = Pivot::Original; a.baseRotation = glm::vec3(0.0f, -90.0f, 0.0f);
+	//scene.RegisterAsset(a);
+	
+	//a = AssetDesc(); a.id = "reflector"; a.path = I + "simple-spotlight/source/Spotlight/source/spotlight_simple_animado.fbx";
+	//a.unitScale = 0.01f; a.pivot = Pivot::Original; a.baseRotation = glm::vec3(0.0f, -90.0f, 0.0f);
+	//scene.RegisterAsset(a);
 
+	a = AssetDesc(); a.id = "reflector"; a.path = I + "simple-spotlight/source/Spotlight/source/spotlight_simple_animado.gltf";a.path = I + "simple-spotlight/source/Spotlight/source/spotlight_simple_animado.glb";
+	
+
+	a.pivot = Pivot::Original;   // conserva el punto de montaje en el origen
+	a.baseRotation = glm::vec3(0.0f, 0.0f, 0.0f);   // se ajusta abajo
+	scene.RegisterAsset(a);
 	// Reflector con haz de luz. La lente apunta a +Z del archivo y el haz es un cono irregular de
 	// 1.85 m. El haz NO se ilumina: se dibuja como "glow" (Material::glow) con el degradado alfa de
 	// TEX_Lightbeam.png (opaco en la lente, transparente en el extremo) y el color de su luz real.
 	// Antes se dibujaba como superficie gris iluminada con opacidad fija: de ahí los polígonos grises.
-	a = AssetDesc(); a.id = "reflector_haz"; a.path = I + "spotlight/source/Spotlight/Spotlight_Scene.fbx";
+	a = AssetDesc(); a.id = "reflector_haz"; a.path = I + "spotlight/source/Spotlight/Spotlight_Scene.fbx"; 
 	a.unitScale = 0.01f;
 	a.options.diffuseOverrides = { { "MAT_SceneProps", "TEX_SceneProps_AL.png" }, { "MAT_Lightbeam", "TEX_Lightbeam.png" } };
 	a.options.opacityOverrides = { { "MAT_Lightbeam", 0.55f } };
@@ -258,6 +269,13 @@ inline void RegisterArenaAssets(Scene& scene)
 	a = AssetDesc(); a.id = "bandera"; a.path = I + "mexican-flag/source/FB SP MexFlag.fbx";
 	a.unitScale = 0.005f; a.pivot = Pivot::Center;   // 8.2 m en el archivo -> 4.1 x 2.3 m
 	a.options.diffuseOverrides = { { "*", "../textures/FB_SP_MexFlag_MexFlag_BaseColor.1001.png" } };
+	scene.RegisterAsset(a);
+
+	//minion
+	a = AssetDesc(); a.id = "minion"; a.path = I + "minion/source/minion.fbx";
+	a.targetHeight = 1.0f;      // ajusta a la altura que quieras (m)
+	a.pivot = Pivot::Original;  // la animación se hizo respecto al origen del archivo
+	a.options.restPoseClip = 0; // mide la altura en el primer cuadro (silla con escala 0)
 	scene.RegisterAsset(a);
 
 	// Bandera animada (GLB con shape keys / animación). La bandera estática "bandera" se conserva.
@@ -538,6 +556,11 @@ inline void BuildArena(Scene& scene)
 	const glm::vec3 esquinas[3] = { glm::vec3(4.6f, 0.0f, 4.6f), glm::vec3(4.6f, 0.0f, -4.6f), glm::vec3(-4.6f, 0.0f, -4.6f) };
 	for (int i = 0; i < 3; i++)
 		scene.Add("camara_esquina_" + std::to_string(i), "camara_broadcast", "camaras").At(esquinas[i]).RotY(FaceYaw(esquinas[i], centro));
+
+	// minino en esquina del ring
+	glm::vec3 posMinion(2.0f, lona, 2.0f);
+	scene.Add("minion", "minion", "personajes")
+		.At(posMinion).RotY(FaceYaw(posMinion, centro));
 
 	// ---------------- Bocinas en los pasillos de las esquinas y bandera sobre las gradas norte
 	const glm::vec3 bocinas[2] = { glm::vec3(7.6f, 0.0f, 7.6f), glm::vec3(-7.6f, 0.0f, 7.6f) };

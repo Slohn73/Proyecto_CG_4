@@ -106,6 +106,13 @@ Model* modeloArbitro = nullptr;
 Model* modeloLuchador = nullptr;
 std::vector<Model*> modelosAnimados;
 
+//minion
+Model* modeloMinion = nullptr;
+int clipMinion = 0;
+
+
+Model* modeloReflector = nullptr;
+
 // Variables para animaciones por código y procedurales
 float rotacionCinturon = 0.0f;
 float escalaBocina = 1.0f;
@@ -305,8 +312,14 @@ int main(int argc, char** argv)
 				modeloBanderaAnimada = obj.asset->model.get();
 		}
 
+		if (obj.assetId == "minion" && obj.asset && obj.asset->model)
+			modeloMinion = obj.asset->model.get();
+
 		if (obj.assetId == "arbitro" && obj.asset && obj.asset->model)
 			modeloArbitro = obj.asset->model.get();
+
+		if (obj.assetId == "reflector" && !modeloReflector && obj.asset && obj.asset->model && obj.asset->model->HasAnimations())
+			modeloReflector = obj.asset->model.get();
 
 		if (obj.assetId == "luchador" && !modeloLuchador && obj.asset && obj.asset->model && obj.asset->model->HasAnimations())
 			modeloLuchador = obj.asset->model.get();
@@ -330,6 +343,14 @@ int main(int argc, char** argv)
 		else penta.Caida();
 	}
 
+	if (modeloMinion)
+	{
+		modeloMinion->PrintAnimations();   // imprime los nombres de los clips
+		clipMinion = std::max(modeloMinion->FindAnimation("Armature"), 0); // o parte del nombre de tu clip
+		// Sin esto el minion aparece en pose base y la silla se vería a tamaño completo
+		modeloMinion->ShowAnimationFrame(clipMinion, 0.0f);
+	}
+
 	// Recorte de la animación de la bandera (segundos, no frames)
 	if (modeloBanderaAnimada)
 	{
@@ -350,7 +371,6 @@ int main(int argc, char** argv)
 	double titleTimer = 0.0;
 	double loopStart = glfwGetTime();
 	lastFrame = (GLfloat)loopStart;   // Si no, el primer deltaTime incluiría toda la carga de modelos
-
 	while (!glfwWindowShouldClose(window))
 	{
 		GLfloat currentFrame = (GLfloat)glfwGetTime();
@@ -827,6 +847,17 @@ void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mode
 			obj.visible = !obj.visible;
 			std::cout << obj.id << (obj.visible ? " visible" : " oculto") << std::endl;
 		}
+
+		// minion alza los brazos y lanza silla
+		if (key == GLFW_KEY_M && modeloMinion) {
+			// modeloMinion->SetAnimationRange(0.0f, 89.0f / 24.0f);  // si debes recortar cuadros (fps de Blender)
+			modeloMinion->TriggerAnimation(clipMinion, false);
+		}
+
+		// pausar la animación de los reflectores del marcador
+		if (key == GLFW_KEY_K && modeloReflector)
+			modeloReflector->ToggleAnimation(0, true);
+
 		if (key == GLFW_KEY_F12) screenshotRequested = true;
 	}
 }
