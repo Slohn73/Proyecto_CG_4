@@ -1,6 +1,6 @@
 # Proyecto Final CG — Lucha Libre Mexicana ("Little Endians", Grupo 04)
 
-Escena 3D de una arena de lucha libre en C++ con OpenGL 3.3, GLFW, GLEW, GLM, Assimp y SOIL2.
+Escena 3D de una arena de lucha libre en C++ con OpenGL 3.3, GLFW, GLEW, GLM, Assimp 5.4.1 y SOIL2.
 
 ## Cómo ejecutar
 
