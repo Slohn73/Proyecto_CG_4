@@ -1,0 +1,204 @@
+================================================================================
+        MANUAL DE INSTALACIÓN Y USO DE SOFTWARE
+        Proyecto Final: Lucha Libre Mexicana
+================================================================================
+
+Equipo:   "Little Endians" - Grupo 04
+Materia:  Computación Gráfica e Interacción Humano-Computadora
+Software: luchaLibreCompuG.exe
+
+--------------------------------------------------------------------------------
+1. REQUISITOS DEL SISTEMA
+--------------------------------------------------------------------------------
+
+Mínimos:
+  - Sistema operativo: Windows 10 o superior (el programa es de 32 bits y
+    también corre en Windows de 64 bits).
+  - Tarjeta gráfica y controlador con soporte de OpenGL 3.3 o superior
+    (cualquier GPU con OpenGL 3.x/4.x: Intel HD Graphics 4000 en adelante,
+    NVIDIA o AMD de los últimos años). Mantener el controlador actualizado.
+  - Memoria RAM: 4 GB.
+  - Espacio en disco: el que indique el instalador.
+  - Monitor con resolución de 1280 x 720 o mayor.
+  - Microsoft Visual C++ Redistributable 2015-2022 (x86). El instalador lo
+    pide o se descarga desde el sitio oficial de Microsoft si no está presente.
+
+Recomendado:
+  - Tarjeta gráfica dedicada y laptop conectada a la corriente (en batería la
+    carga de modelos es más lenta).
+
+Cómo comprobar la versión de OpenGL:
+  Al iniciar, el programa abre una consola y escribe la versión de OpenGL y el
+  nombre de la tarjeta gráfica. Si la ventana no abre o la consola indica una
+  versión menor a 3.3, actualice el controlador de video.
+
+
+--------------------------------------------------------------------------------
+2. INSTALACIÓN (OPCIÓN A: INSTALADOR .EXE)
+--------------------------------------------------------------------------------
+
+El software se entrega empaquetado con InstallForge en un archivo .exe.
+
+  1. Ejecute el instalador "luchaLibreCompuG_Setup.exe" (haga doble clic).
+     Si Windows muestra el aviso de SmartScreen, elija "Más información" y
+     después "Ejecutar de todos modos".
+  2. Acepte el acuerdo de licencia.
+  3. Elija la carpeta de instalación.
+  4. Marque la opción de crear acceso directo en el escritorio (opcional).
+  5. Pulse "Instalar" y espere a que termine. Pulse "Finalizar".
+  6. Abra el programa con el acceso directo "Lucha Libre CG" o desde el menú
+     Inicio.
+
+Importante: el programa busca sus recursos (shaders, modelos, skybox y DLL) en
+la carpeta donde se ejecuta. El acceso directo ya está configurado para iniciar
+en la carpeta de instalación; no mueva el .exe fuera de ella.
+
+Desinstalación:
+  Configuración de Windows > Aplicaciones > "Lucha Libre CG" > Desinstalar, o
+  ejecute el desinstalador de la carpeta de instalación.
+
+
+--------------------------------------------------------------------------------
+3. INSTALACIÓN (OPCIÓN B: DESDE EL REPOSITORIO DE GITHUB)
+--------------------------------------------------------------------------------
+
+Para ejecutar el proyecto desde el código fuente no se necesita instalar
+bibliotecas adicionales: GLEW, GLFW, Assimp 5.4.1, GLM y SOIL2 ya vienen
+incluidas en el repositorio.
+
+Requisitos: Git y Visual Studio (probado con VS 2026, toolset v145) con la
+carga de trabajo "Desarrollo para el escritorio con C++".
+
+  1. Clone el repositorio:
+         git clone https://github.com/Slohn73/Proyecto_CG_4
+  2. Abra "luchaLibreCompuG/luchaLibreCompuG.slnx" con Visual Studio.
+  3. Seleccione la configuración "Debug | x86".
+  4. Ejecute con F5 (depurando) o Ctrl+F5 (sin depurar). El directorio de
+     trabajo debe ser "luchaLibreCompuG/luchaLibreCompuG/" (es el
+     predeterminado de Visual Studio): ahí están los shaders, modelos, skybox
+     y DLL.
+  5. Espere a que cargue. La carga de modelos tarda unos 20 segundos, más en
+     laptop con batería. La versión Release carga notablemente más rápido
+     que Debug.
+
+Si algo falla, revise la ventana "Lista de errores". Los avisos LNK4099 sobre
+"soil2-debug.pdb" son inofensivos.
+
+
+--------------------------------------------------------------------------------
+4. INICIO DEL PROGRAMA
+--------------------------------------------------------------------------------
+
+  1. Abra el programa. Aparece una consola (ventana negra) y, tras la carga,
+     la ventana "Proyecto Final CG: Lucha Libre Mexicana" (1280 x 720). No
+     cierre la consola mientras use el programa.
+  2. La cámara inicia en la vista general de la arena. El cursor del mouse
+     queda capturado por la ventana para girar la cámara.
+  3. Para salir, presione ESC.
+
+El título de la ventana muestra la posición de la cámara, el objeto
+seleccionado (si hay uno) y los cuadros por segundo (fps).
+
+
+--------------------------------------------------------------------------------
+5. CONTROLES
+--------------------------------------------------------------------------------
+
+CÁMARA
+  W A S D / flechas ........ Mover la cámara (adelante, izquierda, atrás,
+                             derecha)
+  Mouse .................... Mirar alrededor
+  E / Q .................... Subir / bajar
+  Shift .................... Movimiento rápido (x4)
+  Rueda del mouse .......... Zoom
+  R ........................ Regresar a la vista inicial
+  1 a 6 .................... Vistas predefinidas: 1 general, 2 ring,
+                             3 entrada, 4 desde el público, 5 cenital,
+                             6 mesa de comentaristas
+  C ........................ Liberar / capturar el cursor del mouse
+  ESC ...................... Salir
+
+ANIMACIONES Y ACCIONES
+  Espacio .................. Ataque del luchador (se ejecuta una vez)
+  T ........................ Activar / pausar la animación del árbitro
+  G ........................ Activar / pausar la bandera animada
+  M ........................ El minion alza los brazos y lanza la silla
+  K ........................ Pausar / reanudar los reflectores del marcador
+  B ........................ Lanzar el burrito desde el público hacia el ring
+  Z ........................ El espectador E lanza su cerveza (brazo izquierdo)
+  X ........................ El espectador E levanta el brazo derecho y bebe
+  L ........................ Cambiar el color de las luces (rojo / azul)
+  F5 ....................... Penta: animación de entrada por la rampa
+  F6 ....................... Penta: animación de caída en el ring
+  F7 ....................... Penta: volver a la pose de espera
+
+  Siempre en movimiento (sin tecla): el cinturón de campeonato gira, las
+  bocinas vibran y la cerveza de la mesa de comentaristas brinca.
+
+DEPURACIÓN (opcionales)
+  F1 ....................... Cuadrícula de 1 m y ejes (X rojo, Y verde, Z azul)
+  F2 ....................... Cajas envolventes de todos los objetos
+  F3 ....................... Reporte de modelos y posiciones en la consola
+  F4 ....................... Volver a mostrar todos los objetos
+  F8 ....................... Mostrar / ocultar el esqueleto de Penta
+  Tab / Shift+Tab .......... Seleccionar objeto (caja amarilla)
+  H ........................ Ocultar / mostrar el objeto seleccionado
+  F12 ...................... Guardar captura de pantalla "captura_N.png" en la
+                             carpeta del programa
+
+Nota: las teclas de animación actúan una vez por pulsación; mantenerlas
+presionadas no reinicia la animación.
+
+
+--------------------------------------------------------------------------------
+6. OPCIONES DE LÍNEA DE COMANDOS (OPCIONAL)
+--------------------------------------------------------------------------------
+
+Abra un símbolo del sistema en la carpeta del programa y ejecute:
+
+  luchaLibreCompuG.exe --galeria                 Una instancia de cada modelo
+  luchaLibreCompuG.exe --vista 3                 Vista inicial (1 a 6)
+  luchaLibreCompuG.exe --camara x y z yaw pitch  Posición exacta de la cámara
+  luchaLibreCompuG.exe --depuracion              Cuadrícula, ejes y cajas
+  luchaLibreCompuG.exe --captura foto.png        Guarda una imagen y termina
+  luchaLibreCompuG.exe --segundos 10             Termina tras 10 s e informa fps
+  luchaLibreCompuG.exe --penta entrada           Inicia con la entrada de Penta
+  luchaLibreCompuG.exe --esqueleto               Esqueleto de Penta visible
+
+
+--------------------------------------------------------------------------------
+7. SOLUCIÓN DE PROBLEMAS
+--------------------------------------------------------------------------------
+
+La ventana se cierra al abrir o aparece "Error al crear la ventana de GLFW":
+  La tarjeta gráfica o su controlador no soporta OpenGL 3.3. Actualice el
+  controlador de video desde el sitio del fabricante (Intel, NVIDIA o AMD). En
+  laptops con dos tarjetas, configure Windows para usar la tarjeta dedicada con
+  este programa (Configuración > Sistema > Pantalla > Gráficos).
+
+Mensaje de que falta una DLL (por ejemplo "VCRUNTIME140.dll" o la de Assimp):
+  Instale Microsoft Visual C++ Redistributable 2015-2022 (x86). Si falta la DLL
+  de Assimp u otra incluida con el programa, reinstale o verifique que el .exe
+  esté en su carpeta original junto con sus DLL.
+
+La escena aparece negra o sin modelos / texturas, o la consola muestra errores
+al cargar archivos:
+  El programa no encuentra las carpetas "Shaders", "modelos" o "Skybox".
+  Ejecútelo desde su carpeta de instalación (acceso directo o doble clic al
+  .exe dentro de ella); no copie el .exe a otro lugar.
+
+Tarda mucho en abrir:
+  La carga de los modelos 3D toma alrededor de 20 segundos (más en batería o
+  en Debug). Espere a que aparezca la ventana.
+
+El mouse no se libera:
+  Presione C para liberar el cursor.
+
+--------------------------------------------------------------------------------
+8. CRÉDITOS
+--------------------------------------------------------------------------------
+
+Equipo "Little Endians", Grupo 04.
+Bibliotecas de terceros: OpenGL, GLFW, GLEW, GLM, Assimp 5.4.1 y SOIL2.
+
+================================================================================
