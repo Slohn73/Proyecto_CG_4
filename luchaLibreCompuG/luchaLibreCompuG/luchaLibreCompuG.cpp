@@ -350,6 +350,12 @@ int main(int argc, char** argv)
 		glUniformMatrix4fv(glGetUniformLocation(lightingShader.Program, "projection"), 1, GL_FALSE, glm::value_ptr(projection));
 		lightRig.Apply(lightingShader);
 
+		// Mapa de entorno (cube map) para el reflejo de Fresnel: unidad 2 (0 y 1 son difusa y especular)
+		glActiveTexture(GL_TEXTURE2);
+		glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTexture);
+		glActiveTexture(GL_TEXTURE0);
+		glUniform1i(glGetUniformLocation(lightingShader.Program, "envMap"), 2);
+
 		scene.DrawOpaque(lightingShader);
 
 		if (showDebugGrid || showAllBounds || selectedObject >= 0)

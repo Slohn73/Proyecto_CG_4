@@ -61,6 +61,9 @@ struct ModelOptions
 	// Típico de Mixamo: un FBX "With Skin" del personaje + un FBX "Without Skin" por animación.
 	// Los nombres de los nodos/huesos deben coincidir con los del modelo.
 	vector<string> animationFiles;
+	// Reflectividad por material (nombre -> 0..1) para el modelo de Fresnel + mapa de entorno (cubemap).
+	// 0 = Phong puro; ~0.3 plástico/barniz; ~0.6-0.9 metal. La clave "*" aplica a todos los materiales.
+	map<string, float> reflectivityOverrides;
 };
 
 // Parte original del archivo (nodo/malla) con su caja envolvente; se conserva aunque las
@@ -716,7 +719,7 @@ private:
 			ostringstream k;
 			k << m.diffuseMap << '|' << m.specularMap << '|' << m.specularColor.r << ',' << m.specularColor.g << ',' << m.specularColor.b
 				<< '|' << m.emissiveColor.r << ',' << m.emissiveColor.g << ',' << m.emissiveColor.b << '|' << m.shininess
-				<< '|' << m.opacity << '|' << m.alphaTest << '|' << m.glow << '|' << m.skinned;
+				<< '|' << m.opacity << '|' << m.alphaTest << '|' << m.glow << '|' << m.skinned << '|' << m.reflectivity;
 			return k.str();
 		};
 
@@ -1062,6 +1065,12 @@ private:
 		auto em = this->options.emissiveOverrides.find(mat.name);
 		if (em != this->options.emissiveOverrides.end())
 			mat.emissiveColor = em->second;
+
+		auto rf = this->options.reflectivityOverrides.find(mat.name);
+		if (rf == this->options.reflectivityOverrides.end())
+			rf = this->options.reflectivityOverrides.find("*");
+		if (rf != this->options.reflectivityOverrides.end())
+			mat.reflectivity = glm::clamp(rf->second, 0.0f, 1.0f);
 
 		mat.alphaTest = this->options.alphaTest;
 		for (const string& glowName : this->options.glowMaterials)

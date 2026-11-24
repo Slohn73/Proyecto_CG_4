@@ -17,6 +17,7 @@ struct Material
     float opacity;
     bool alphaTest;
     bool glow;              // Haz de luz: no recibe iluminación, solo brilla (ver la función main)
+    float reflectivity;     // 0 = solo Phong; >0 = mezcla Fresnel (Schlick) con el cubemap (metal / vidrio)
 };
 
 struct DirLight
@@ -71,6 +72,7 @@ uniform SpotLight spotLights[MAX_SPOT_LIGHTS];
 uniform int numSpotLights;
 uniform Material material;
 uniform vec3 objectGlow;    // Color del haz de este objeto (lo sincroniza la luz real del reflector)
+uniform samplerCube envMap; // Mapa de entorno (el mismo cubemap del skybox), unidad de textura 2
 
 // Color base y especular del fragmento (textura o color del material)
 vec3 albedo;
@@ -129,6 +131,24 @@ void main( )
     result += material.emissive;
 
     float alpha = material.opacity * ( material.alphaTest ? texel.a : 1.0 );
+
+    // ---- Técnica 2: Fresnel (aproximación de Schlick) + environment mapping (cube map) ----
+    // Phong (arriba) describe el material opaco. Para metales y superficies translúcidas se suma el
+    // reflejo del entorno, ponderado por Fresnel: F = F0 + (1 - F0) * (1 - N.V)^5
+    // (poco reflejo de frente, mucho en ángulos rasantes). En translúcidos F también sube la opacidad.
+    if ( material.reflectivity > 0.0 )
+    {
+        float k = material.reflectivity;
+        float cosTheta = clamp( dot( norm, viewDir ), 0.0, 1.0 );
+        float F0 = 0.04 + 0.5 * k;                         // dieléctrico ~0.04, metal ~0.5-0.9
+        float fresnel = F0 + ( 1.0 - F0 ) * pow( 1.0 - cosTheta, 5.0 );
+        vec3 envColor = texture( envMap, reflect( -viewDir, norm ) ).rgb;
+        envColor *= mix( vec3( 1.0 ), albedo, k );         // los metales tiñen el reflejo con su color
+        float amount = clamp( fresnel * k * 1.5, 0.0, 1.0 );
+        result = mix( result, envColor, amount );
+        alpha = mix( alpha, 1.0, fresnel * k );            // translúcido: más opaco en ángulos rasantes
+    }
+
     color = vec4( result, alpha );
 }
 

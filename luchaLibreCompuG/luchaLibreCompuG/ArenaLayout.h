@@ -118,6 +118,7 @@ inline void RegisterArenaAssets(Scene& scene)
 	a = AssetDesc(); a.id = "barrera"; a.path = P + "barrera/barrera.obj";
 	a.unitScale = 0.625f;
 	a.options.diffuseOverrides = { { "*", "textures/Textura de acero galvanizado desgastado.png" } };
+	a.options.reflectivityOverrides = { { "*", 0.35f } };   // Acero: Fresnel + reflejo del cubemap
 	scene.RegisterAsset(a);
 
 	// Marcador colgante de 4 pantallas, misma escala que el ring (x3): 2.7 x 2.1 x 3.4 m
@@ -136,6 +137,7 @@ inline void RegisterArenaAssets(Scene& scene)
 	// quede a 0.46 m, igual que el asiento de los espectadores. El respaldo está en +Z del archivo.
 	a = AssetDesc(); a.id = "silla"; a.path = P + "silla_metalica/silla_metalica.fbx";
 	a.unitScale = 0.46f / 163.0f; a.baseRotation = glm::vec3(0.0f, 180.0f, 0.0f);
+	a.options.reflectivityOverrides = { { "*", 0.45f } };   // Silla metálica
 	scene.RegisterAsset(a);
 
 	// ---- Modelos importados ----
@@ -163,6 +165,7 @@ inline void RegisterArenaAssets(Scene& scene)
 	// Cinturón (convertido del .blend con herramientas/convertir_blend.py), 1.26 m de largo
 	a = AssetDesc(); a.id = "cinturon"; a.path = I + "cinturon/cinturon_curvado.obj";
 	a.pivot = Pivot::Center;
+	a.options.reflectivityOverrides = { { "*", 0.6f } };    // Cinturón metálico: Fresnel + reflejo del cubemap
 	scene.RegisterAsset(a);
 
 	// Espectadores low-poly sentados (convertidos del .blend). Origen en el centro del asiento

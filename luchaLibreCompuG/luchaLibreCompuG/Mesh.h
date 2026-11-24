@@ -48,6 +48,7 @@ struct Material
 	bool alphaTest = false;   // Descarta fragmentos con alfa < 0.1 (recortes como hojas o rejillas)
 	bool skinned = false;     // Malla animada: el vertex shader aplica finalBonesMatrices (lo fija Model al cargar)
 	bool glow = false;        // Haz de luz: sin iluminación, color emisivo * objectGlow, alfa de la textura
+	float reflectivity = 0.0f; // 0 = solo Phong. >0 = mezcla Fresnel (Schlick) con el reflejo del cubemap (metal/vidrio)
 
 	bool IsTransparent() const { return opacity < 0.999f; }
 };
@@ -57,7 +58,7 @@ struct Material
 struct MaterialUniforms
 {
 	GLint diffuseMap, specularMap, hasDiffuseMap, hasSpecularMap;
-	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow, useSkinning;
+	GLint diffuseColor, specularColor, emissiveColor, shininess, opacity, alphaTest, glow, useSkinning, reflectivity;
 
 	static const MaterialUniforms& For(GLuint program)
 	{
@@ -78,6 +79,7 @@ struct MaterialUniforms
 		u.opacity = glGetUniformLocation(program, "material.opacity");
 		u.alphaTest = glGetUniformLocation(program, "material.alphaTest");
 		u.glow = glGetUniformLocation(program, "material.glow");
+		u.reflectivity = glGetUniformLocation(program, "material.reflectivity");
 			u.useSkinning = glGetUniformLocation(program, "useSkinning");   // -1 en shaders sin skinning: glUniform lo ignora
 		return cache[program] = u;
 	}
@@ -211,6 +213,7 @@ public:
 		glUniform1f(u.opacity, m.opacity);
 		glUniform1i(u.alphaTest, m.alphaTest);
 		glUniform1i(u.glow, m.glow);
+		glUniform1f(u.reflectivity, m.reflectivity);
 		glUniform1i(u.useSkinning, m.skinned);
 
 		// Draw mesh
